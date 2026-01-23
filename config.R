@@ -50,7 +50,8 @@ foia_files <- c(
 lca_data_path <- file.path(data_raw, "LCA_Data")
 
 # ACS (American Community Survey) IPUMS microdata
-acs_ddi_file <- file.path(data_raw, "usa_00061.xml")
+# Update this to match your actual IPUMS extract filename
+acs_ddi_file <- file.path(data_raw, "usa_00068.xml")
 
 # SOC code definitions
 soc_definitions_file <- file.path(data_raw, "soc_2018_definitions.xlsx")
