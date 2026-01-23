@@ -1,0 +1,29 @@
+# Data files (too large for git)
+data/raw/*
+data/intermediate/*
+data/processed/*
+
+# R files
+.Rhistory
+.RData
+.Rproj.user
+*.Rproj
+
+# Output files (can be regenerated)
+output/figures/*
+output/tables/*
+
+# Keep directory structure
+!data/raw/.gitkeep
+!data/intermediate/.gitkeep
+!data/processed/.gitkeep
+!output/figures/.gitkeep
+!output/tables/.gitkeep
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.log
