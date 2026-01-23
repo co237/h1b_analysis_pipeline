@@ -26,7 +26,14 @@ library(tidyr)
 # ============================================================================
 
 # Load configuration
-source("../config.R")
+# Check if we're in the scripts directory or project root
+if (file.exists("../config.R")) {
+  source("../config.R")  # Running from scripts/
+} else if (file.exists("config.R")) {
+  source("config.R")      # Running from project root
+} else {
+  stop("Cannot find config.R. Please run from project root or scripts/ directory")
+}
 
 # Input file path (output from data cleaning step)
 input_file <- cleaned_h1b_file
