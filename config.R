@@ -7,11 +7,19 @@
 
 # --- Project Paths ---
 # Get the directory where this config file is located
-project_root <- dirname(rstudioapi::getActiveDocumentContext()$path)
-if (length(project_root) == 0 || project_root == "") {
-  # Fallback if not running from RStudio
-  project_root <- getwd()
-}
+# Use getwd() as the default, which should be the project root when sourcing
+project_root <- tryCatch({
+  # Try rstudioapi if available and running in RStudio
+  if (requireNamespace("rstudioapi", quietly = TRUE) &&
+      rstudioapi::isAvailable()) {
+    dirname(rstudioapi::getActiveDocumentContext()$path)
+  } else {
+    getwd()
+  }
+}, error = function(e) {
+  # Fallback to current working directory
+  getwd()
+})
 
 # Main data directories
 data_dir <- file.path(project_root, "data")
