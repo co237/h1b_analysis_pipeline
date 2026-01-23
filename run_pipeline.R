@@ -50,8 +50,8 @@ run_step1_cleaning <- TRUE
 run_step2_geocoding <- TRUE
 run_step3_analysis <- TRUE
 
-# Skip confirmation prompt?
-skip_confirmation <- FALSE
+# Skip confirmation prompt? Set to TRUE to run without asking
+skip_confirmation <- TRUE  # Changed to TRUE for convenience
 
 # ============================================================================
 # Pre-Flight Checks
@@ -123,10 +123,12 @@ if (!skip_confirmation) {
   cat("Step 2 - Geocoding:      ", ifelse(run_step2_geocoding, "ENABLED", "SKIPPED"), "\n")
   cat("Step 3 - Analysis:       ", ifelse(run_step3_analysis, "ENABLED", "SKIPPED"), "\n")
   cat("\nProceed with pipeline execution? (y/n): ")
+  cat("\n[HINT: Type 'y' and press Enter to continue, or set skip_confirmation=TRUE in run_pipeline.R]\n")
 
   response <- tolower(trimws(readline()))
   if (response != "y" && response != "yes") {
     cat("\nPipeline execution cancelled by user.\n")
+    cat("To run without this prompt, set skip_confirmation <- TRUE at the top of run_pipeline.R\n")
     quit(save = "no")
   }
 }
