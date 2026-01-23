@@ -13,9 +13,9 @@
 # ============================================================================
 
 cat("\n")
-cat("=" %>% rep(70) %>% paste(collapse = ""))
+cat(paste(rep("=", 70), collapse = ""))
 cat("\n            H-1B WAGE PREMIUM ANALYSIS PIPELINE\n")
-cat("=" %>% rep(70) %>% paste(collapse = ""))
+cat(paste(rep("=", 70), collapse = ""))
 cat("\n\n")
 
 # Load configuration
@@ -138,9 +138,9 @@ if (!skip_confirmation) {
 start_time <- Sys.time()
 
 cat("\n")
-cat("=" %>% rep(70) %>% paste(collapse = ""))
+cat(paste(rep("=", 70), collapse = ""))
 cat("\n                 STARTING PIPELINE EXECUTION\n")
-cat("=" %>% rep(70) %>% paste(collapse = ""))
+cat(paste(rep("=", 70), collapse = ""))
 cat("\n\n")
 
 # --- STEP 1: Data Cleaning ---
@@ -216,9 +216,9 @@ if (run_step3_analysis) {
 total_duration <- difftime(Sys.time(), start_time, units = "mins")
 
 cat("\n")
-cat("=" %>% rep(70) %>% paste(collapse = ""))
+cat(paste(rep("=", 70), collapse = ""))
 cat("\n                 PIPELINE EXECUTION COMPLETE\n")
-cat("=" %>% rep(70) %>% paste(collapse = ""))
+cat(paste(rep("=", 70), collapse = ""))
 cat("\n\n")
 cat("Total execution time:", round(total_duration, 2), "minutes\n")
 cat("\nOutput locations:\n")
