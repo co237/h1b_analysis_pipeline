@@ -135,13 +135,22 @@ if (!skip_confirmation) {
 # Execute Pipeline
 # ============================================================================
 
+# Set timezone explicitly (helps with macOS Apple Silicon issues)
+Sys.setenv(TZ = "America/New_York")
+
+cat("Recording pipeline start time...\n")
+flush.console()
 start_time <- Sys.time()
+cat("Pipeline started at:", as.character(start_time), "\n")
 
 cat("\n")
 cat(paste(rep("=", 70), collapse = ""))
 cat("\n                 STARTING PIPELINE EXECUTION\n")
 cat(paste(rep("=", 70), collapse = ""))
 cat("\n\n")
+
+# Set timezone explicitly (helps with some macOS issues)
+Sys.setenv(TZ = "America/New_York")
 
 # --- STEP 1: Data Cleaning ---
 if (run_step1_cleaning) {
@@ -150,7 +159,10 @@ if (run_step1_cleaning) {
   cat("  STEP 1: DATA CLEANING\n")
   cat("=================================================================\n\n")
 
+  cat("Recording start time...\n")
+  flush.console()
   step1_start <- Sys.time()
+  cat("Step 1 started at:", as.character(step1_start), "\n")
 
   tryCatch({
     source(file.path(scripts_dir, "01_data_cleaning.R"), local = FALSE)
