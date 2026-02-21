@@ -29,8 +29,7 @@
   #   (7) first pass on those without SOC occupations via string similarity on DOT codes and free string job titles
   #   (8) second pass on those without SOC occupations via machine learning on company names, degree fields, job titles, and DOT codes of entries with SOC codes
   #   (9) entries that still have no SOC matches cannot be merged with OFLC wage levels; use LCA wage levels for these and filter out those without LCA wage levels
-  #   (10) adjust 2021-2023 wages by the ratio of average wage for the corresponding MSA-SOC combination in 2024 OES over the average wage for the given year-MSA-SOC combo
-  #   (11) merge with 2024-2025 OFLC wage levels and determine wage levels with the time-adjusted I-129 wages
+
   #   (12) wherever the wage is lower than OFLC Level I lower bound, re-label as wage level I
   #   (13) wherever the LCA wage levels cannot be determined, fall back to LCA wage levels
   # remove extraneous variables and export cleaned data by year
@@ -65,7 +64,7 @@ library(tidycensus)
 
 # set project paths from config
 data_path = data_raw
-foia_path = data_raw  # FOIA files should be in data/raw
+foia_path = foia_data_path  # FOIA files in FOIA Data subdirectory
 lca_path = lca_data_path
 cleaned_path = data_intermediate
 dot_matching_path = file.path(data_intermediate, "dot_matching")
@@ -1346,3 +1345,12 @@ cat("Cleaned H-1B data saved to:", cleaned_h1b_file, "\n")
 cat("\nData cleaning complete!\n")
 cat("Next step: Run 02_geocode_to_pumas.R to add PUMA codes\n")
 
+h1b_merged$full %>%
+  mutate(premium = INCWAGE - Native,
+         pos_neg = ifelse(premium>0,1,0)) %>%
+  filter(H1B == 1) %>%
+  group_by(YEAR, pos_neg) %>%
+  summarise(n = n()) %>%
+  pivot_wider(names_from = pos_neg,
+              values_from = n) %>%
+  mutate(share_positive = `1`/(`1`+`0`))

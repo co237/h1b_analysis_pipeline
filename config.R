@@ -7,19 +7,40 @@
 
 # --- Project Paths ---
 # Get the directory where this config file is located
-# Use getwd() as the default, which should be the project root when sourcing
+# This should be the project root
 project_root <- tryCatch({
-  # Try rstudioapi if available and running in RStudio
-  if (requireNamespace("rstudioapi", quietly = TRUE) &&
-      rstudioapi::isAvailable()) {
-    dirname(rstudioapi::getActiveDocumentContext()$path)
+  # First, try to use the location of this config.R file
+  if (exists("ofile") && !is.null(ofile)) {
+    # When sourced, sys.frame(1)$ofile contains the path
+    dirname(normalizePath(ofile))
+  } else if (requireNamespace("rstudioapi", quietly = TRUE) &&
+             rstudioapi::isAvailable()) {
+    # Try rstudioapi if available
+    active_doc <- tryCatch(rstudioapi::getActiveDocumentContext()$path, error = function(e) "")
+    if (active_doc != "" && file.exists(active_doc)) {
+      dirname(active_doc)
+    } else {
+      getwd()
+    }
   } else {
+    # Fallback to current working directory
     getwd()
   }
 }, error = function(e) {
-  # Fallback to current working directory
+  # Last resort: use working directory
   getwd()
 })
+
+# Ensure project_root is not empty
+if (is.null(project_root) || project_root == "" || !dir.exists(project_root)) {
+  project_root <- getwd()
+}
+
+# Final validation: if we still have an invalid path, stop with helpful message
+if (is.null(project_root) || project_root == "" || !dir.exists(project_root)) {
+  stop("Cannot determine project root directory. Please set working directory:\n",
+       "  setwd('/Users/connorobrien/Documents/GitHub/h1b_analysis_pipeline')")
+}
 
 # Main data directories
 data_dir <- file.path(project_root, "data")
@@ -37,6 +58,7 @@ scripts_dir <- file.path(project_root, "scripts")
 
 # --- Input Data Files ---
 # FOIA H-1B petition data (FY 2021-2024)
+foia_data_path <- file.path(data_raw, "FOIA Data")
 foia_files <- c(
   "TRK_13139_FY2021.csv",
   "TRK_13139_FY2022.csv",
@@ -63,18 +85,21 @@ census_crosswalks_dir <- file.path(data_raw, "census_crosswalks")
 # OFLC wage level data
 oflc_data_path <- file.path(data_raw, "OFLC_Wages_2024-25")
 
+# Other data directory (contains crosswalks and reference files)
+other_data_path <- file.path(data_raw, "Other Data")
+
 # HUD ZIP to County crosswalk
-hud_zip_county_file <- file.path(data_raw, "ZIP_COUNTY_122024.xlsx")
-hud_zip_cbsa_file <- file.path(data_raw, "ZIP_CBSA_122024.xlsx")
+hud_zip_county_file <- file.path(other_data_path, "ZIP_COUNTY_122024.xlsx")
+hud_zip_cbsa_file <- file.path(other_data_path, "ZIP_CBSA_122024.xlsx")
 
 # County to MSA crosswalk
-county_msa_file <- file.path(data_raw, "area_definitions_m2023.xlsx")
+county_msa_file <- file.path(other_data_path, "area_definitions_m2023.xlsx")
 
 # SOC 2010 to 2018 crosswalk
-soc_crosswalk_file <- file.path(data_raw, "soc_2010_to_2018_crosswalk.xlsx")
+soc_crosswalk_file <- file.path(other_data_path, "soc_2010_to_2018_crosswalk.xlsx")
 
 # DOT to SOC crosswalk
-dot_soc_file <- file.path(data_raw, "DOT_to_ONET_SOC.xlsx")
+dot_soc_file <- file.path(other_data_path, "DOT_to_ONET_SOC.xlsx")
 
 # --- Intermediate Output Files ---
 # From Step 1: Data Cleaning
@@ -138,7 +163,8 @@ check_required_files <- function() {
 create_directories <- function() {
   dirs <- c(data_raw, data_intermediate, data_processed,
             output_figures, output_tables, census_crosswalks_dir,
-            lca_data_path, oflc_data_path)
+            lca_data_path, oflc_data_path,
+            file.path(data_intermediate, "dot_matching"))
 
   for (dir in dirs) {
     if (!dir.exists(dir)) {

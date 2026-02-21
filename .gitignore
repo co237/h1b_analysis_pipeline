@@ -1,7 +1,18 @@
+# ==============================================================================
+# H-1B Analysis Pipeline - Git Ignore
+# ==============================================================================
+# Large data files are stored in Google Drive (see README.md for links)
+# ==============================================================================
+
 # Data files (too large for git)
 data/raw/*
 data/intermediate/*
 data/processed/*
+
+# Keep README files that explain where to get data
+!data/raw/README.md
+!data/intermediate/README.md
+!data/processed/README.md
 
 # R files
 .Rhistory
@@ -9,9 +20,13 @@ data/processed/*
 .Rproj.user
 *.Rproj
 
-# Output files (can be regenerated)
+# Output files (can be regenerated or stored in Google Drive)
 output/figures/*
 output/tables/*
+
+# Keep README files in output directories
+!output/figures/README.md
+!output/tables/README.md
 
 # Keep directory structure
 !data/raw/.gitkeep
@@ -22,8 +37,12 @@ output/tables/*
 
 # OS files
 .DS_Store
+.DS_Store?
+._*
 Thumbs.db
 
 # Temporary files
 *.tmp
 *.log
+*.bak
+*~

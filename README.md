@@ -2,6 +2,23 @@
 
 A comprehensive R-based pipeline for analyzing wage premiums of H-1B visa holders compared to native-born workers, with multiple control configurations including geographic (PUMA) controls.
 
+## Recent Updates (February 2026)
+
+### Important Fix: Year Matching Correction
+**Previous Issue**: Some analysis sections were incorrectly using fiscal year (FY) instead of employment year when comparing H-1B wages to ACS native wages, creating a one-year mismatch.
+
+**Fix Applied**: All wage comparisons now correctly use:
+- FY 2022 H-1Bs → Employment year 2021 → ACS 2021
+- FY 2023 H-1Bs → Employment year 2022 → ACS 2022
+- FY 2024 H-1Bs → Employment year 2023 → ACS 2023
+
+This ensures H-1B workers are compared to native-born workers in the same calendar year they were employed.
+
+### New Features
+- **Export File**: New script (`04_export_h1b_comparisons.R`) creates a comprehensive CSV with all H-1B workers and their native wage benchmarks across all 5 control configurations
+- **Google Drive Integration**: Documentation for organizing large files in Google Drive for collaboration (see `DATA_GOOGLE_DRIVE.md`)
+- **Updated Pipeline**: Now runs 6 steps including the new export functionality
+
 ## Overview
 
 This project integrates three main components:
@@ -14,14 +31,19 @@ This project integrates three main components:
 ```
 h1b_analysis_pipeline/
 ├── README.md                      # This file
+├── DATA_GOOGLE_DRIVE.md           # Guide for organizing large files
 ├── config.R                       # Central configuration file
-├── run_pipeline.R                 # Main pipeline orchestration script
+├── run_pipeline_simple.R          # Main pipeline orchestration (RECOMMENDED)
 ├── .gitignore                     # Git ignore rules
 │
 ├── scripts/                       # Analysis scripts (run in order)
 │   ├── 01_data_cleaning.R        # Clean and merge FOIA/LCA data
 │   ├── 02_geocode_to_pumas.R     # Geocode ZIP codes to PUMAs
-│   └── 03_wage_premium_analysis.R # Wage premium analysis with controls
+│   ├── 03_wage_premium_analysis.R # Wage premium analysis with controls
+│   ├── 04_export_h1b_comparisons.R # Export H-1B with native comparisons
+│   └── simple/                    # Simplified step-by-step scripts
+│       ├── step1_process_lca.R
+│       └── step2_process_foia.R
 │
 ├── data/                          # Data files (not tracked in git)
 │   ├── raw/                       # Original data files
@@ -46,15 +68,31 @@ h1b_analysis_pipeline/
 │       └── h1b_fy21_24_with_pumas.csv
 │
 └── output/                        # Analysis outputs
-    ├── figures/                   # Generated plots
+    ├── figures/                   # Generated plots (30+ charts)
     └── tables/                    # Generated tables
+        ├── summary_by_control.csv
+        └── h1b_with_native_comparisons_fy2022_2024.csv (45 MB)
 ```
 
-## Data Requirements
+## Data Files
+
+### 📦 Large Data Files on Google Drive
+
+**All large data files (>100 MB) are stored in Google Drive** to keep the GitHub repository lightweight.
+
+**Google Drive Folder**: `h1b_analysis_pipeline_data` (~8.2 GB)
+
+**For access**: Contact connor@ifp.org or see `DATA_GOOGLE_DRIVE.md` for setup instructions.
+
+**Folder contents**:
+- `raw/` (~7.1 GB): Original source data
+- `intermediate/` (~658 MB): Processing checkpoints
+- `processed/` (~350 MB): Final geocoded dataset
+- `output/tables/` (~45 MB): Large analysis outputs
 
 ### Required Data Files
 
-You must obtain and place the following files in `data/raw/`:
+If setting up from scratch, you must obtain and place the following files in `data/raw/` (or get them from Google Drive):
 
 #### 1. H-1B FOIA Petition Data
 - **Files**: `TRK_13139_FY2021.csv`, `TRK_13139_FY2022.csv`, `TRK_13139_FY2023.csv`, `TRK_13139_FY2024_single_reg.csv`, `TRK_13139_FY2024_multi_reg.csv`
@@ -70,7 +108,7 @@ You must obtain and place the following files in `data/raw/`:
   - `H-1B_Disclosure_Data_FY20XX.xlsx` (2015-2019)
 
 #### 3. ACS Microdata (IPUMS)
-- **Files**: `usa_00061.xml` (DDI) and `usa_00061.dat.gz` (microdata)
+- **Files**: `usa_00068.xml` (DDI) and `usa_00068.dat.gz` (microdata) - **Note**: Filename may vary based on your IPUMS extract
 - **Source**: [IPUMS USA](https://usa.ipums.org/)
 - **Years**: 2021-2023 ACS
 - **Required Variables**:
@@ -201,72 +239,118 @@ git clone https://github.com/yourusername/h1b_analysis_pipeline.git
 cd h1b_analysis_pipeline
 ```
 
-### 4. Configure Paths
+### 4. Get Data Files from Google Drive
+
+**Option 1: Request access to shared Google Drive folder**
+- Contact connor@ifp.org for access to `h1b_analysis_pipeline_data`
+- Download or sync the folder
+- See `DATA_GOOGLE_DRIVE.md` for detailed setup instructions
+
+**Option 2: Gather data files yourself**
+- Follow the data requirements list above
+- Download from original sources
+- Place in `data/raw/` directory
+
+### 5. Configure Paths
 
 Edit `config.R` to set paths appropriate for your system. By default, paths are relative to the project directory.
 
-### 5. Obtain Data Files
-
-Place all required data files in `data/raw/` as described in the Data Requirements section above.
-
 ## Usage
 
-### Running the Complete Pipeline
+### Running the Complete Pipeline (RECOMMENDED)
 
-The easiest way to run the analysis is using the main pipeline script:
+The easiest way to run the analysis is using the simplified pipeline script:
 
 ```r
 # In R or RStudio, from the project directory:
-source("run_pipeline.R")
+source("run_pipeline_simple.R")
 ```
 
 This will:
-1. Check for required data files
-2. Run all three steps in sequence
-3. Generate output files and visualizations
+1. Process LCA data (Step 1)
+2. Process FOIA data (Step 2)
+3. Merge and clean data (Step 3)
+4. Geocode to PUMAs (Step 4)
+5. Run wage premium analysis (Step 5)
+6. Export H-1B with native comparisons (Step 6)
+
+The pipeline has checkpoint recovery - if it crashes, just run it again and it will skip completed steps.
 
 ### Running Individual Steps
 
 You can also run steps independently:
 
 ```r
-# Step 1: Data Cleaning
+# Steps 1-4: Data processing
+source("scripts/simple/step1_process_lca.R")
+source("scripts/simple/step2_process_foia.R")
 source("scripts/01_data_cleaning.R")
-
-# Step 2: Geocoding
 source("scripts/02_geocode_to_pumas.R")
 
-# Step 3: Wage Premium Analysis
+# Step 5: Wage Premium Analysis
 source("scripts/03_wage_premium_analysis.R")
+
+# Step 6: Export comparisons file
+source("scripts/04_export_h1b_comparisons.R")
 ```
 
 ### Customizing Pipeline Execution
 
-Edit `run_pipeline.R` to skip certain steps:
+Edit `run_pipeline_simple.R` to skip certain steps:
 
 ```r
-run_step1_cleaning <- FALSE   # Skip data cleaning
-run_step2_geocoding <- TRUE   # Run geocoding
-run_step3_analysis <- TRUE    # Run analysis
+run_steps <- list(
+  step1 = TRUE,   # Process LCA data
+  step2 = TRUE,   # Process FOIA data
+  step3 = TRUE,   # Merge FOIA + LCA
+  geocode = TRUE, # Geocode to PUMAs
+  analyze = TRUE, # Wage premium analysis
+  export = TRUE   # Export comparisons file
+)
 ```
 
 ## Outputs
 
 ### Data Outputs
 
-- `data/intermediate/h1b_fy21_24_cleaned.csv`: Cleaned H-1B data with wage levels
-- `data/processed/h1b_fy21_24_with_pumas.csv`: H-1B data with PUMA codes added
+- `data/intermediate/h1b_fy21_24_cleaned.csv`: Cleaned H-1B data with wage levels (~334 MB)
+- `data/processed/h1b_fy21_24_with_pumas.csv`: H-1B data with PUMA codes added (~350 MB)
 
 ### Analysis Outputs
 
 Outputs are saved to `output/figures/` and `output/tables/`:
 
+**Charts** (30+ figures):
 - Wage premium by age group (all control configurations)
 - Comparisons by H-1B dependency status
 - Comparisons by DOL wage level
 - Comparisons by prior visa status
-- Top H-1B occupations
-- Summary statistics tables
+- Top H-1B occupations by wage premium
+- Industry analysis
+- Top employer analysis
+
+**Tables**:
+- `summary_by_control.csv`: Summary statistics for each control configuration
+- **`h1b_with_native_comparisons_fy2022_2024.csv`** (~45 MB): **NEW** - Comprehensive export with all 273,545 H-1B workers (FY 2022-2024) and their native wage benchmarks for all 5 control configurations
+
+### Understanding the Export File
+
+The `h1b_with_native_comparisons_fy2022_2024.csv` file contains:
+
+**Columns:**
+- Identifiers: `applicant_id`, `registration_lottery_year`, `employment_year`
+- H-1B characteristics: `h1b_wage`, `age`, `age_group`, `education_code`, `occupation_soc`, `occupation_title`, `puma_code`, `employer_name`, `h1b_dependent`, `wage_level`, `prior_visa`
+- Native wage benchmarks: `native_wage_age_only`, `native_wage_age_education`, `native_wage_age_occupation`, `native_wage_full`, `native_wage_puma`
+- Wage premiums: `premium_age_only`, `premium_age_education`, `premium_age_occupation`, `premium_full`, `premium_puma`
+
+**Control Configurations:**
+1. **age_only**: Matched on `employment_year` + `age_group`
+2. **age_education**: Matched on `employment_year` + `education_code` + `age_group`
+3. **age_occupation**: Matched on `employment_year` + `occupation_soc` + `age_group`
+4. **full**: Matched on `employment_year` + `education_code` + `occupation_soc` + `age_group`
+5. **puma**: Matched on `employment_year` + `education_code` + `occupation_soc` + `age_group` + `puma_code`
+
+**Key Point**: All comparisons use **employment year** (FY year - 1) to ensure H-1B workers are compared to natives in the same calendar year they were employed.
 
 ## Troubleshooting
 

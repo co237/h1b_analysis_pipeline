@@ -146,6 +146,9 @@ if (!"PUMA" %in% names(acs_raw)) {
   warning("PUMA variable not found in ACS data. The age_occ_ed_puma control will not work.")
   warning("Please re-download your ACS extract from IPUMS with PUMA included.")
 }
+if (!"STATEFIP" %in% names(acs_raw)) {
+  warning("STATEFIP variable not found in ACS data. Cannot create state+PUMA codes.")
+}
 
 # SOC occupation code definitions for labeling
 soc_codes <- read_excel(soc_definitions_file, skip = 7) %>%
@@ -166,25 +169,45 @@ occ6_labels <- soc_codes %>%
 # for specific comparison levels and will be naturally excluded during merges
 h1b <- h1b_raw %>%
   transmute(
-    YEAR = registration_lottery_year,
-    AGE = YEAR - registration_birth_year,
+    # Use employment start year (prior calendar year) for matching to ACS
+    # FY 2022 lottery → employment in 2021, FY 2023 → 2022, FY 2024 → 2023
+    YEAR = registration_lottery_year - 1,
+    AGE = registration_lottery_year - registration_birth_year,  # Age at lottery time
     OCCSOC = as.character(as.numeric(gsub("-", "", SOC_CODE))),  # Convert to char for consistency
     EDUCD = map_education_code(petition_beneficiary_edu_code),
     INCWAGE = petition_annual_pay_clean,
     h1b_dependent = petition_employer_h1b_dependent,
     wage_level = wage_level_combined,
     prior_visa = petition_beneficiary_classif,
-    # Use 2010 PUMA for 2021-2023 ACS data (which uses 2010 PUMAs)
-    PUMA = as.character(PUMA_2010),
+    # Use correct PUMA vintage based on employment start year (YEAR):
+    # - YEAR 2021 (FY 2022) → ACS 2021 → 2010 PUMAs
+    # - YEAR 2022-2023 (FY 2023-2024) → ACS 2022-2023 → 2020 PUMAs
+    PUMA = case_when(
+      YEAR == 2021 ~ as.character(PUMA_2010),  # Match to ACS 2021 (2010 PUMAs)
+      YEAR >= 2022 ~ as.character(PUMA_2020),  # Match to ACS 2022+ (2020 PUMAs)
+      TRUE ~ NA_character_
+    ),
+    PUMA_vintage = case_when(
+      YEAR == 2021 ~ "2010",
+      YEAR >= 2022 ~ "2020",
+      TRUE ~ NA_character_
+    ),
     H1B = 1L,
     PERWT = 1  # H-1B records are unweighted
   ) %>%
   filter(!is.na(AGE), INCWAGE > 0,
-         YEAR != 2021)  # Only require valid age and income
+         YEAR >= 2021)  # Keep employment years 2021-2023 (FY 2022-2024)
 
 cat("H-1B records after cleaning:", nrow(h1b), "\n")
 cat("  - With valid education code:", sum(h1b$EDUCD != 0), "\n")
 cat("  - With valid occupation code:", sum(!is.na(h1b$OCCSOC)), "\n")
+cat("  - With valid PUMA codes:", sum(!is.na(h1b$PUMA)), "\n")
+cat("  - Year distribution:", paste(names(table(h1b$YEAR)), "=", table(h1b$YEAR), collapse = ", "), "\n")
+if (sum(!is.na(h1b$PUMA)) > 0) {
+  cat("  - 2010 PUMA vintage (employment year 2021):", sum(h1b$PUMA_vintage == "2010", na.rm = TRUE), "\n")
+  cat("  - 2020 PUMA vintage (employment years 2022-23):", sum(h1b$PUMA_vintage == "2020", na.rm = TRUE), "\n")
+  cat("  - Example H-1B PUMA codes:", paste(head(unique(h1b$PUMA[!is.na(h1b$PUMA)]), 5), collapse = ", "), "\n")
+}
 
 # Clean ACS data: native-born, employed, with valid income
 natives <- acs_raw %>%
@@ -203,13 +226,33 @@ natives <- acs_raw %>%
     h1b_dependent = NA_character_,
     wage_level = NA_character_,
     prior_visa = NA_character_,
-    # PUMA variable (if available in ACS data)
-    PUMA = if("PUMA" %in% names(acs_raw)) as.character(PUMA) else NA_character_,
+    # Create 7-digit state+PUMA code to match H-1B format (SSFFFFFF)
+    # Example: State 01 + PUMA 00100 = "0100100"
+    # IMPORTANT: ACS 2021 uses 2010 PUMAs, ACS 2022+ uses 2020 PUMAs
+    PUMA = if("PUMA" %in% names(acs_raw) && "STATEFIP" %in% names(acs_raw)) {
+      paste0(
+        sprintf("%02d", as.integer(STATEFIP)),  # 2-digit state FIPS
+        sprintf("%05d", as.integer(PUMA))        # 5-digit PUMA code
+      )
+    } else {
+      NA_character_
+    },
+    PUMA_vintage = case_when(
+      YEAR <= 2021 ~ "2010",  # ACS 2021 and earlier use 2010 PUMAs
+      YEAR >= 2022 ~ "2020",  # ACS 2022 and later use 2020 PUMAs
+      TRUE ~ NA_character_
+    ),
     H1B = 0L,
     PERWT
   )
 
 cat("Native-born ACS records after cleaning:", nrow(natives), "\n")
+cat("  - With valid PUMA codes:", sum(!is.na(natives$PUMA)), "\n")
+if (sum(!is.na(natives$PUMA)) > 0) {
+  cat("  - 2010 PUMA vintage:", sum(natives$PUMA_vintage == "2010", na.rm = TRUE), "\n")
+  cat("  - 2020 PUMA vintage:", sum(natives$PUMA_vintage == "2020", na.rm = TRUE), "\n")
+  cat("  - Example PUMA codes:", paste(head(unique(natives$PUMA[!is.na(natives$PUMA)]), 5), collapse = ", "), "\n")
+}
 
 # --- Combine into Analysis Panel ---
 panel <- bind_rows(h1b, natives) %>%
@@ -289,16 +332,57 @@ for (nm in names(h1b_merged)) {
   cat(sprintf("  %s: %.1f%%\n", nm, rate))
 }
 
+# Additional diagnostics for PUMA matching
+cat("\n--- PUMA Matching Diagnostics ---\n")
+h1b_with_puma <- panel %>% filter(H1B == 1, !is.na(PUMA))
+cat("H-1B records with valid PUMA:", nrow(h1b_with_puma), "\n")
+if (nrow(h1b_with_puma) > 0) {
+  cat("  By vintage - 2010:", sum(h1b_with_puma$PUMA_vintage == "2010", na.rm = TRUE), "\n")
+  cat("  By vintage - 2020:", sum(h1b_with_puma$PUMA_vintage == "2020", na.rm = TRUE), "\n")
+  cat("  Example H-1B PUMAs:", paste(head(unique(h1b_with_puma$PUMA), 5), collapse = ", "), "\n")
+}
+
+natives_with_puma <- panel %>% filter(H1B == 0, !is.na(PUMA))
+cat("Native records with valid PUMA:", nrow(natives_with_puma), "\n")
+if (nrow(natives_with_puma) > 0) {
+  cat("  By vintage - 2010 (ACS 2021):", sum(natives_with_puma$PUMA_vintage == "2010", na.rm = TRUE), "\n")
+  cat("  By vintage - 2020 (ACS 2022-23):", sum(natives_with_puma$PUMA_vintage == "2020", na.rm = TRUE), "\n")
+  cat("  Example Native PUMAs:", paste(head(unique(natives_with_puma$PUMA), 5), collapse = ", "), "\n")
+}
+
+# Check for overlapping PUMAs BY YEAR (key for vintage matching)
+cat("\nPUMA overlap by year:\n")
+for (yr in unique(panel$YEAR[panel$YEAR >= 2021])) {
+  h1b_pumas_yr <- unique(panel$PUMA[panel$H1B == 1 & panel$YEAR == yr & !is.na(panel$PUMA)])
+  native_pumas_yr <- unique(panel$PUMA[panel$H1B == 0 & panel$YEAR == yr & !is.na(panel$PUMA)])
+  overlap_yr <- intersect(h1b_pumas_yr, native_pumas_yr)
+  cat(sprintf("  Year %d: %d H-1B PUMAs, %d Native PUMAs, %d overlap (%.1f%%)\n",
+              yr, length(h1b_pumas_yr), length(native_pumas_yr), length(overlap_yr),
+              if(length(h1b_pumas_yr) > 0) length(overlap_yr) / length(h1b_pumas_yr) * 100 else 0))
+}
+cat("---\n")
+
 # =============================================================================
 # 5. Results: Basic Comparisons by Age
 # =============================================================================
+
+# Helper function to save plots
+save_plot <- function(plot_obj, filename, width = 10, height = 6) {
+  filepath <- file.path(output_figures, filename)
+  ggsave(filepath, plot = plot_obj, width = width, height = height, dpi = 300)
+  cat("  Saved:", filename, "\n")
+  return(plot_obj)
+}
+
+cat("\n=== Generating and Saving Figures ===\n")
+cat("(Key charts will be saved to:", output_figures, ")\n\n")
 
 # --- Share with Positive Premium (Age Only) ---
 premium_age_only <- h1b_merged$age_only %>%
   calc_share_positive(age_grp) %>%
   filter(!is.na(age_grp), age_grp != "[65,Inf]")
 
-ggplot(premium_age_only, aes(x = age_grp, y = share_positive)) +
+p1 <- ggplot(premium_age_only, aes(x = age_grp, y = share_positive)) +
   geom_col(width = 0.8, fill = ifp_colors$light_blue) +
   geom_text(aes(label = percent(share_positive, accuracy = 1)), vjust = -0.4, size = 3.5) +
   scale_y_continuous(labels = percent, limits = c(0, 1), expand = expansion(mult = c(0, 0.08))) +
@@ -311,13 +395,15 @@ ggplot(premium_age_only, aes(x = age_grp, y = share_positive)) +
     caption = "Source: FY 2022-2024 H-1B data; 2021-2023 ACS via IPUMS"
   ) +
   theme_h1b()
+save_plot(p1, "01_share_positive_age_only.png")
+print(p1)
 
 # --- Average Premium (Age Only) ---
 avg_age_only <- h1b_merged$age_only %>%
   calc_avg_premium(age_grp) %>%
   filter(!is.na(age_grp), age_grp != "[65,Inf]")
 
-ggplot(avg_age_only, aes(x = age_grp, y = avg_premium)) +
+p2 <- ggplot(avg_age_only, aes(x = age_grp, y = avg_premium)) +
   geom_col(width = 0.8, fill = ifp_colors$light_blue) +
   geom_text(aes(
     label = paste0("$", round(avg_premium/1000), "k"),
@@ -333,6 +419,8 @@ ggplot(avg_age_only, aes(x = age_grp, y = avg_premium)) +
     caption = "Source: FY 2022-2024 H-1B data; 2021-2023 ACS via IPUMS"
   ) +
   theme_h1b()
+save_plot(p2, "02_avg_premium_age_only.png")
+print(p2)
 
 # =============================================================================
 # 6. Adding Education Controls
@@ -343,7 +431,7 @@ premium_ed_age <- h1b_merged$ed_age %>%
   calc_share_positive(age_grp) %>%
   filter(!is.na(age_grp), age_grp != "[65,Inf]")
 
-ggplot(premium_ed_age, aes(x = age_grp, y = share_positive)) +
+p3 <- ggplot(premium_ed_age, aes(x = age_grp, y = share_positive)) +
   geom_col(width = 0.8, fill = ifp_colors$orange) +
   geom_text(aes(label = percent(share_positive, accuracy = 1)), vjust = -0.4, size = 3.5) +
   scale_y_continuous(labels = percent, limits = c(0, 1), expand = expansion(mult = c(0, 0.08))) +
@@ -356,13 +444,15 @@ ggplot(premium_ed_age, aes(x = age_grp, y = share_positive)) +
     caption = "Source: FY 2022-2024 H-1B data; 2021-2023 ACS via IPUMS"
   ) +
   theme_h1b()
+save_plot(p3, "03_share_positive_age_education.png")
+print(p3)
 
 # --- Average Premium (Age + Education) ---
 avg_ed_age <- h1b_merged$ed_age %>%
   calc_avg_premium(age_grp) %>%
   filter(!is.na(age_grp), age_grp != "[65,Inf]")
 
-ggplot(avg_ed_age, aes(x = age_grp, y = avg_premium)) +
+p4 <- ggplot(avg_ed_age, aes(x = age_grp, y = avg_premium)) +
   geom_col(width = 0.8, fill = ifp_colors$orange) +
   geom_text(aes(
     label = ifelse(avg_premium >= 0, paste0("$", round(avg_premium/1000), "k"),
@@ -379,6 +469,8 @@ ggplot(avg_ed_age, aes(x = age_grp, y = avg_premium)) +
     caption = "Source: FY 2022-2024 H-1B data; 2021-2023 ACS via IPUMS"
   ) +
   theme_h1b()
+save_plot(p4, "04_avg_premium_age_education.png")
+print(p4)
 
 # =============================================================================
 # 7. Adding Occupation Controls
@@ -389,7 +481,7 @@ premium_occ_age <- h1b_merged$occ_age %>%
   calc_share_positive(age_grp) %>%
   filter(!is.na(age_grp), age_grp != "[65,Inf]")
 
-ggplot(premium_occ_age, aes(x = age_grp, y = share_positive)) +
+p5 <- ggplot(premium_occ_age, aes(x = age_grp, y = share_positive)) +
   geom_col(width = 0.8, fill = ifp_colors$purple) +
   geom_text(aes(label = percent(share_positive, accuracy = 1)), vjust = -0.4, size = 3.5) +
   scale_y_continuous(labels = percent, limits = c(0, 1), expand = expansion(mult = c(0, 0.08))) +
@@ -403,12 +495,15 @@ ggplot(premium_occ_age, aes(x = age_grp, y = share_positive)) +
   ) +
   theme_h1b()
 
+save_plot(p5, "05_share_positive_age_occupation.png")
+print(p5)
+
 # --- Average Premium (Age + Occupation) ---
 avg_occ_age <- h1b_merged$occ_age %>%
   calc_avg_premium(age_grp) %>%
   filter(!is.na(age_grp), age_grp != "[65,Inf]")
 
-ggplot(avg_occ_age, aes(x = age_grp, y = avg_premium)) +
+p6 <- ggplot(avg_occ_age, aes(x = age_grp, y = avg_premium)) +
   geom_col(width = 0.8, fill = ifp_colors$purple) +
   geom_text(aes(
     label = ifelse(avg_premium >= 0, paste0("$", round(avg_premium/1000), "k"),
@@ -425,6 +520,9 @@ ggplot(avg_occ_age, aes(x = age_grp, y = avg_premium)) +
   ) +
   theme_h1b()
 
+save_plot(p6, "06_avg_premium_age_occupation.png")
+print(p6)
+
 # =============================================================================
 # 8. Full Controls: Age, Occupation, and Education
 # =============================================================================
@@ -434,7 +532,7 @@ premium_full <- h1b_merged$full %>%
   calc_share_positive(age_grp) %>%
   filter(!is.na(age_grp), age_grp != "[65,Inf]")
 
-ggplot(premium_full, aes(x = age_grp, y = share_positive)) +
+p7 <- ggplot(premium_full, aes(x = age_grp, y = share_positive)) +
   geom_col(width = 0.8, fill = ifp_colors$dark_blue) +
   geom_text(aes(label = percent(share_positive, accuracy = 1)), vjust = -0.4, size = 3.5) +
   scale_y_continuous(labels = percent, limits = c(0, 1), expand = expansion(mult = c(0, 0.08))) +
@@ -448,12 +546,15 @@ ggplot(premium_full, aes(x = age_grp, y = share_positive)) +
   ) +
   theme_h1b()
 
+save_plot(p7, "07_share_positive_full_controls.png")
+print(p7)
+
 # --- Average Premium (Full Controls) ---
 avg_full <- h1b_merged$full %>%
   calc_avg_premium(age_grp) %>%
   filter(!is.na(age_grp), age_grp != "[65,Inf]")
 
-ggplot(avg_full, aes(x = age_grp, y = avg_premium)) +
+p8 <- ggplot(avg_full, aes(x = age_grp, y = avg_premium)) +
   geom_col(width = 0.8, fill = ifp_colors$dark_blue) +
   geom_text(aes(
     label = ifelse(avg_premium >= 0, paste0("$", round(avg_premium/1000), "k"),
@@ -471,6 +572,9 @@ ggplot(avg_full, aes(x = age_grp, y = avg_premium)) +
   ) +
   theme_h1b()
 
+save_plot(p8, "08_avg_premium_full_controls.png")
+print(p8)
+
 # =============================================================================
 # 9. Analysis by Prior Visa Status
 # =============================================================================
@@ -482,7 +586,7 @@ prior_visa_data <- h1b_merged$full %>%
 prior_visa_share <- prior_visa_data %>%
   calc_share_positive(change_of_status, age_grp)
 
-ggplot(prior_visa_share, aes(x = age_grp, y = share_positive, fill = change_of_status)) +
+p_prior_visa <- ggplot(prior_visa_share, aes(x = age_grp, y = share_positive, fill = change_of_status)) +
   geom_col(position = position_dodge(0.9), width = 0.8) +
   geom_text(aes(label = percent(share_positive, accuracy = 1)),
             position = position_dodge(0.9), vjust = -0.4, size = 2.8) +
@@ -500,6 +604,9 @@ ggplot(prior_visa_share, aes(x = age_grp, y = share_positive, fill = change_of_s
   ) +
   theme_h1b()
 
+save_plot(p_prior_visa, "11_share_positive_by_prior_visa.png")
+print(p_prior_visa)
+
 # =============================================================================
 # 10. Analysis by H-1B Dependent Employer Status
 # =============================================================================
@@ -511,7 +618,7 @@ dependency_data <- h1b_merged$full %>%
 dependency_share <- dependency_data %>%
   calc_share_positive(h1b_dependent, age_grp)
 
-ggplot(dependency_share, aes(x = age_grp, y = share_positive, fill = h1b_dependent)) +
+p_dependency_share <- ggplot(dependency_share, aes(x = age_grp, y = share_positive, fill = h1b_dependent)) +
   geom_col(position = position_dodge(0.9), width = 0.8) +
   geom_text(aes(label = percent(share_positive, accuracy = 1)),
             position = position_dodge(0.9), vjust = -0.4, size = 2.8) +
@@ -529,6 +636,9 @@ ggplot(dependency_share, aes(x = age_grp, y = share_positive, fill = h1b_depende
   ) +
   theme_h1b()
 
+save_plot(p_dependency_share, "12_share_positive_by_h1b_dependency.png")
+print(p_dependency_share)
+
 # --- Average Wage Premium by Dependency Status ---
 dependency_avg_premium <- dependency_data %>%
   filter(!is.na(Native)) %>%
@@ -540,7 +650,7 @@ dependency_avg_premium <- dependency_data %>%
     .groups = "drop"
   )
 
-ggplot(dependency_avg_premium, aes(x = age_grp, y = avg_premium, fill = h1b_dependent)) +
+p_dependency_avg <- ggplot(dependency_avg_premium, aes(x = age_grp, y = avg_premium, fill = h1b_dependent)) +
   geom_col(position = position_dodge(0.9), width = 0.8) +
   geom_text(aes(label = dollar(avg_premium / 1000, accuracy = 1, suffix = "k")),
             position = position_dodge(0.9), vjust = -0.4, size = 2.8) +
@@ -559,6 +669,9 @@ ggplot(dependency_avg_premium, aes(x = age_grp, y = avg_premium, fill = h1b_depe
   ) +
   theme_h1b()
 
+save_plot(p_dependency_avg, "13_avg_premium_by_h1b_dependency.png")
+print(p_dependency_avg)
+
 # =============================================================================
 # 11. Top H-1B Occupations
 # =============================================================================
@@ -568,7 +681,7 @@ occ_premia <- h1b_merged$full %>%
   left_join(occ6_labels, by = c("OCCSOC" = "occ")) %>%
   filter(!is.na(`SOC Title`))
 
-occ_premia %>%
+p_top_occupations <- occ_premia %>%
   arrange(desc(Total)) %>%
   head(10) %>%
   ggplot(aes(x = reorder(str_wrap(`SOC Title`, 28), Total), y = share_positive)) +
@@ -586,6 +699,9 @@ occ_premia %>%
   ) +
   theme_minimal() +
   theme(plot.title = element_text(size = 12, face = "bold"))
+
+save_plot(p_top_occupations, "27_top_occupations_by_count.png")
+print(p_top_occupations)
 
 # --- Top Occupations Table ---
 occ_premia %>%
@@ -616,7 +732,7 @@ above_50th_share
 wage_level_share_overall <- wage_level_data %>%
   calc_share_positive(wage_level)
 
-ggplot(wage_level_share_overall, aes(x = wage_level, y = share_positive, fill = wage_level)) +
+p_wage_level_share <- ggplot(wage_level_share_overall, aes(x = wage_level, y = share_positive, fill = wage_level)) +
   geom_col(width = 0.7) +
   geom_text(aes(label = percent(share_positive, accuracy = 1)), vjust = -0.4, size = 3.5) +
   scale_fill_manual(values = ifp_wage_level_colors) +
@@ -631,11 +747,14 @@ ggplot(wage_level_share_overall, aes(x = wage_level, y = share_positive, fill = 
   theme_h1b() +
   theme(legend.position = "none")
 
+save_plot(p_wage_level_share, "14_share_positive_by_wage_level.png")
+print(p_wage_level_share)
+
 # --- Share with Positive Premium by Wage Level and H-1B Dependency ---
 wage_level_share <- wage_level_data %>%
   calc_share_positive(wage_level, h1b_dependent)
 
-ggplot(wage_level_share, aes(x = wage_level, y = share_positive, fill = h1b_dependent)) +
+p_wage_level_by_dep <- ggplot(wage_level_share, aes(x = wage_level, y = share_positive, fill = h1b_dependent)) +
   geom_col(position = position_dodge(0.9), width = 0.8) +
   geom_text(aes(label = percent(share_positive, accuracy = 1)),
             position = position_dodge(0.9), vjust = -0.4, size = 3) +
@@ -652,6 +771,9 @@ ggplot(wage_level_share, aes(x = wage_level, y = share_positive, fill = h1b_depe
   ) +
   theme_h1b()
 
+save_plot(p_wage_level_by_dep, "15_share_positive_by_wage_level_and_dependency.png")
+print(p_wage_level_by_dep)
+
 # --- Average Premium by Wage Level (Overall) ---
 wage_level_avg_overall <- wage_level_data %>%
   filter(!is.na(Native)) %>%
@@ -663,7 +785,7 @@ wage_level_avg_overall <- wage_level_data %>%
     .groups = "drop"
   )
 
-ggplot(wage_level_avg_overall, aes(x = wage_level, y = avg_premium, fill = wage_level)) +
+p_wage_level_avg <- ggplot(wage_level_avg_overall, aes(x = wage_level, y = avg_premium, fill = wage_level)) +
   geom_col(width = 0.7) +
   geom_text(aes(label = dollar(avg_premium / 1000, accuracy = 1, suffix = "k")),
             vjust = ifelse(wage_level_avg_overall$avg_premium >= 0, -0.4, 1.2), size = 3.5) +
@@ -680,6 +802,9 @@ ggplot(wage_level_avg_overall, aes(x = wage_level, y = avg_premium, fill = wage_
   theme_h1b() +
   theme(legend.position = "none")
 
+save_plot(p_wage_level_avg, "16_avg_premium_by_wage_level.png")
+print(p_wage_level_avg)
+
 # --- Average Premium by Wage Level and H-1B Dependency ---
 wage_level_avg_by_dep <- wage_level_data %>%
   filter(!is.na(Native)) %>%
@@ -691,7 +816,7 @@ wage_level_avg_by_dep <- wage_level_data %>%
     .groups = "drop"
   )
 
-ggplot(wage_level_avg_by_dep, aes(x = wage_level, y = avg_premium, fill = h1b_dependent)) +
+p_wage_level_avg_by_dep <- ggplot(wage_level_avg_by_dep, aes(x = wage_level, y = avg_premium, fill = h1b_dependent)) +
   geom_col(position = position_dodge(0.9), width = 0.8) +
   geom_text(aes(label = dollar(avg_premium / 1000, accuracy = 1, suffix = "k")),
             position = position_dodge(0.9), vjust = -0.4, size = 3) +
@@ -709,6 +834,9 @@ ggplot(wage_level_avg_by_dep, aes(x = wage_level, y = avg_premium, fill = h1b_de
   ) +
   theme_h1b()
 
+save_plot(p_wage_level_avg_by_dep, "17_avg_premium_by_wage_level_and_dependency.png")
+print(p_wage_level_avg_by_dep)
+
 # =============================================================================
 # 13. Salary vs. Premium Relationship
 # =============================================================================
@@ -722,7 +850,7 @@ scatter_data <- h1b_merged$full %>%
   ) %>%
   filter(abs(personal_premium) < 250000)
 
-ggplot(scatter_data, aes(x = INCWAGE, y = personal_premium)) +
+p_scatter <- ggplot(scatter_data, aes(x = INCWAGE, y = personal_premium)) +
   geom_point(alpha = 0.4, size = 0.8) +
   geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
   scale_x_continuous(labels = dollar_format(scale = 0.001, suffix = "k")) +
@@ -736,6 +864,9 @@ ggplot(scatter_data, aes(x = INCWAGE, y = personal_premium)) +
   ) +
   theme_minimal() +
   theme(legend.position = "bottom")
+
+save_plot(p_scatter, "18_scatter_salary_vs_premium.png")
+print(p_scatter)
 
 # =============================================================================
 # 14. Summary Statistics
@@ -807,7 +938,7 @@ wage_level_age <- panel %>%
 
 knitr::kable(wage_level_age, caption = "Age Distribution by DOL Wage Level")
 
-panel %>%
+p_age_by_wage_level <- panel %>%
   filter(H1B == 1, !is.na(wage_level), wage_level %in% c("I", "II", "III", "IV")) %>%
   ggplot(aes(x = wage_level, y = AGE, fill = wage_level)) +
   geom_boxplot(alpha = 0.7) +
@@ -821,6 +952,9 @@ panel %>%
   ) +
   theme_h1b() +
   theme(legend.position = "none")
+
+save_plot(p_age_by_wage_level, "28_age_distribution_by_wage_level.png")
+print(p_age_by_wage_level)
 
 # =============================================================================
 # 17. Major Outsourcers Analysis
@@ -855,7 +989,7 @@ outsourcer_data <- h1b_raw %>%
 knitr::kable(outsourcer_data, caption = "H-1B Petitions: Major Outsourcers vs. Other Employers")
 
 # --- Outsourcer Wage Level Distribution ---
-h1b_raw %>%
+p_outsourcer_wage_level <- h1b_raw %>%
   filter(!is.na(wage_level_combined), wage_level_combined %in% c("I", "II", "III", "IV")) %>%
   mutate(
     is_outsourcer = ifelse(registration_employer_name %in% major_outsourcers,
@@ -882,6 +1016,8 @@ h1b_raw %>%
   theme_minimal() +
   theme(legend.position = "bottom")
 
+save_plot(p_outsourcer_wage_level, "29_outsourcer_wage_level_distribution.png")
+print(p_outsourcer_wage_level)
 
 # =============================================================================
 # 18. Example Occupations
@@ -892,8 +1028,8 @@ h1b_cols <- c("SOC_CODE", "registration_birth_year", "petition_annual_pay_clean"
 
 h1b <- h1b_raw %>%
   transmute(
-    YEAR = registration_lottery_year,
-    AGE = YEAR - registration_birth_year,
+    YEAR = registration_lottery_year - 1,  # Use employment year to match ACS
+    AGE = registration_lottery_year - registration_birth_year,  # Age at lottery time
     OCCSOC = as.character(as.numeric(gsub("-", "", SOC_CODE))),
     INCWAGE = petition_annual_pay_clean,
     PERWT = 1,  # H-1B records are unweighted (each = 1 person)
@@ -922,7 +1058,7 @@ natives <- acs_raw %>%
 cat("Native-born records:", nrow(natives), "\n")
 
 # Load SOC definitions for labels
-soc_codes <- read_excel("soc_2018_definitions.xlsx", skip = 7) %>%
+soc_codes <- read_excel(soc_definitions_file, skip = 7) %>%
   mutate(soc_numeric = str_remove_all(`SOC Code`, "-"))
 
 occ_labels <- soc_codes %>%
@@ -1180,7 +1316,7 @@ med_combined <- panel_data %>%
   ungroup()
 
 # Create the 2x2 grid plot
-ggplot(panel_data, aes(INCWAGE, fill = group)) +
+p_distribution <- ggplot(panel_data, aes(INCWAGE, fill = group)) +
   geom_density(aes(weight = PERWT), alpha = 0.35, adjust = 1) +
   geom_vline(data = med_combined, aes(xintercept = med_wage, color = group),
              linewidth = 0.8, show.legend = FALSE) +
@@ -1203,6 +1339,9 @@ ggplot(panel_data, aes(INCWAGE, fill = group)) +
     strip.text = element_text(size = 11, face = "bold"),
     legend.position = "bottom"
   )
+
+save_plot(p_distribution, "19_wage_distribution_by_age.png")
+print(p_distribution)
 
 # =============================================================================
 # 19. High-Wage H-1Bs: Workers Exceeding Level III
@@ -1243,8 +1382,8 @@ cat("  Exceeding Level III:", comma(level3_summary$exceeds_l3),
 h1b_level3_plus <- h1b_with_levels %>%
   filter(exceeds_level3 == TRUE) %>%
   transmute(
-    YEAR = registration_lottery_year,
-    AGE = YEAR - registration_birth_year,
+    YEAR = registration_lottery_year - 1,  # Use employment year to match ACS
+    AGE = registration_lottery_year - registration_birth_year,  # Age at lottery time
     OCCSOC = as.character(as.numeric(gsub("-", "", SOC_CODE))),
     EDUCD = map_education_code(petition_beneficiary_edu_code),
     INCWAGE = petition_annual_pay_clean,
@@ -1328,7 +1467,7 @@ level3_by_employer %>%
   knitr::kable(col.names = c("Employer Type", "N", "Share with Negative Premium",
                               "Average Premium", "Median Premium"))
 
-ggplot(level3_by_employer, aes(x = is_outsourcer, y = share_negative, fill = is_outsourcer)) +
+p_level3_by_employer <- ggplot(level3_by_employer, aes(x = is_outsourcer, y = share_negative, fill = is_outsourcer)) +
   geom_col(width = 0.6) +
   geom_text(aes(label = percent(share_negative, accuracy = 0.1)), vjust = -0.4, size = 4) +
   scale_y_continuous(labels = percent, limits = c(0, max(level3_by_employer$share_negative) * 1.15),
@@ -1344,6 +1483,9 @@ ggplot(level3_by_employer, aes(x = is_outsourcer, y = share_negative, fill = is_
   ) +
   theme_h1b() +
   theme(legend.position = "none")
+
+save_plot(p_level3_by_employer, "20_level3_negative_premium_by_employer_type.png")
+print(p_level3_by_employer)
 
 # --- Share with Negative Premium by Age Group and Employer Type ---
 # Calculate by age group and employer type
@@ -1361,7 +1503,7 @@ level3_by_age_employer <- h1b_level3_merged %>%
   ) %>%
   filter(n >= 20)  # Only show groups with sufficient sample size
 
-ggplot(level3_by_age_employer, aes(x = age_grp, y = share_negative, fill = is_outsourcer)) +
+p_level3_by_age_employer <- ggplot(level3_by_age_employer, aes(x = age_grp, y = share_negative, fill = is_outsourcer)) +
   geom_col(position = position_dodge(0.9), width = 0.8) +
   geom_text(aes(label = percent(share_negative, accuracy = 1)),
             position = position_dodge(0.9), vjust = -0.4, size = 2.8) +
@@ -1379,6 +1521,9 @@ ggplot(level3_by_age_employer, aes(x = age_grp, y = share_negative, fill = is_ou
   ) +
   theme_h1b() +
   theme(legend.position = "bottom")
+
+save_plot(p_level3_by_age_employer, "21_level3_negative_premium_by_age_and_employer.png")
+print(p_level3_by_age_employer)
 
 # --- Comparison Across Wage Levels (II, III) ---
 # Function to analyze workers exceeding a given wage level
@@ -1403,8 +1548,8 @@ analyze_level <- function(data, level_col_full, level_col_part, level_name) {
   exceeds_data <- level_data %>%
     filter(exceeds_level == TRUE) %>%
     transmute(
-      YEAR = registration_lottery_year,
-      AGE = registration_lottery_year - registration_birth_year,
+      YEAR = registration_lottery_year - 1,  # Use employment year to match ACS
+      AGE = registration_lottery_year - registration_birth_year,  # Age at lottery time
       OCCSOC = as.character(as.numeric(gsub("-", "", SOC_CODE))),
       EDUCD = map_education_code(petition_beneficiary_edu_code),
       INCWAGE = petition_annual_pay_clean,
@@ -1519,7 +1664,7 @@ overall_for_chart <- overall_comparison %>%
  bind_rows(tibble(level = "IFP Proposal", share_negative = 0)) %>%
  mutate(level = factor(level, levels = c("Level II", "Level III", "IFP Proposal")))
 
-ggplot(overall_for_chart, aes(x = level, y = share_negative, fill = level)) +
+p_wage_level_comparison <- ggplot(overall_for_chart, aes(x = level, y = share_negative, fill = level)) +
  geom_col(width = 0.7) +
  geom_text(aes(label = percent(share_negative, accuracy = 0.1)),
            vjust = -0.4, size = 3.5) +
@@ -1539,6 +1684,9 @@ ggplot(overall_for_chart, aes(x = level, y = share_negative, fill = level)) +
   theme(legend.position = "none",
        panel.grid.major.x = element_blank())
 
+save_plot(p_wage_level_comparison, "22_wage_level_threshold_comparison.png")
+print(p_wage_level_comparison)
+
 # =============================================================================
 # 20. Employer Analysis: Who Pays Above/Below Native Benchmarks?
 # =============================================================================
@@ -1552,9 +1700,9 @@ ggplot(overall_for_chart, aes(x = level, y = share_negative, fill = level)) +
 # Start fresh from h1b_raw to include employer_name
 h1b_with_employers <- h1b_raw %>%
   transmute(
-    # Use lottery year as the reference year
-    YEAR = registration_lottery_year,
-    # Calculate age from birth year
+    # Use employment year to match ACS (lottery year - 1)
+    YEAR = registration_lottery_year - 1,
+    # Calculate age from birth year (age at lottery time)
     AGE = registration_lottery_year - registration_birth_year,
     # Clean SOC code: remove dashes and convert to character
     OCCSOC = as.character(as.numeric(gsub("-", "", SOC_CODE))),
@@ -1707,7 +1855,7 @@ top_negative_employers %>%
 # --- Step 7: Visualizations ---
 
 # Chart: Top 15 large employers with HIGHEST positive premium rates
-ggplot(top_positive_employers %>% head(15),
+p_top_positive_employers <- ggplot(top_positive_employers %>% head(15),
        aes(x = reorder(str_wrap(employer_name, 30), share_positive),
            y = share_positive)) +
   geom_col(fill = ifp_colors$dark_blue, width = 0.7) +
@@ -1725,8 +1873,11 @@ ggplot(top_positive_employers %>% head(15),
   ) +
   theme_h1b()
 
+save_plot(p_top_positive_employers, "23_top_employers_highest_share_above_natives.png")
+print(p_top_positive_employers)
+
 # Chart: Top 15 large employers with LOWEST positive premium rates (most underpayment)
-ggplot(top_negative_employers %>% head(15),
+p_top_negative_employers <- ggplot(top_negative_employers %>% head(15),
        aes(x = reorder(str_wrap(employer_name, 30), -share_negative),
            y = share_negative)) +
   geom_col(fill = ifp_colors$red, width = 0.7) +
@@ -1743,6 +1894,9 @@ ggplot(top_negative_employers %>% head(15),
     caption = "Note: 'Comparable natives' = same occupation, education, and age group.\nSource: FY 2022-2024 H-1B data; 2021-2023 ACS via IPUMS"
   ) +
   theme_h1b()
+
+save_plot(p_top_negative_employers, "24_top_employers_highest_share_below_natives.png")
+print(p_top_negative_employers)
 
 # --- Step 8: Summary statistics ---
 cat("\n--- SUMMARY: LARGE EMPLOYERS (500+ H-1Bs) ---\n\n")
@@ -1806,9 +1960,9 @@ naics_sector_labels <- c(
 # Start fresh from h1b_raw to include NAICS
 h1b_with_naics <- h1b_raw %>%
   transmute(
-    # Use lottery year as the reference year
-    YEAR = registration_lottery_year,
-    # Calculate age from birth year
+    # Use employment year to match ACS (lottery year - 1)
+    YEAR = registration_lottery_year - 1,
+    # Calculate age from birth year (age at lottery time)
     AGE = registration_lottery_year - registration_birth_year,
     # Clean SOC code: remove dashes and convert to character
     OCCSOC = as.character(as.numeric(gsub("-", "", SOC_CODE))),
@@ -1959,7 +2113,7 @@ industries_for_chart <- industry_summary %>%
   filter(n_total >= 100) %>%
   arrange(desc(share_positive))
 
-ggplot(industries_for_chart,
+p_industry_share <- ggplot(industries_for_chart,
        aes(x = reorder(str_wrap(sector_name, 35), share_positive),
            y = share_positive)) +
   geom_col(fill = ifp_colors$dark_blue, width = 0.7) +
@@ -1978,8 +2132,11 @@ ggplot(industries_for_chart,
   theme_h1b() +
   theme(axis.text.y = element_text(size = 8))
 
+save_plot(p_industry_share, "25_industry_share_above_natives.png")
+print(p_industry_share)
+
 # Chart: Average premium by industry
-ggplot(industries_for_chart,
+p_industry_avg <- ggplot(industries_for_chart,
        aes(x = reorder(str_wrap(sector_name, 35), avg_premium),
            y = avg_premium)) +
   geom_col(aes(fill = avg_premium > 0), width = 0.7) +
@@ -2001,6 +2158,9 @@ ggplot(industries_for_chart,
   ) +
   theme_h1b() +
   theme(axis.text.y = element_text(size = 8))
+
+save_plot(p_industry_avg, "26_industry_avg_premium.png")
+print(p_industry_avg)
 
 # --- Step 8: Summary statistics ---
 cat("\n--- INDUSTRY SUMMARY STATISTICS ---\n\n")
@@ -2025,12 +2185,15 @@ cat("Weighted avg share with positive premium:",
 cat("Industry with highest positive rate:", industry_stats$industry_with_highest, "\n")
 cat("Industry with lowest positive rate:", industry_stats$industry_with_lowest, "\n")
 
-scatter_data %>%
+p_premium_by_age <- scatter_data %>%
   filter(AGE >19) %>%
   group_by(AGE) %>%
   summarise(avg_premium = mean(personal_premium)) %>%
   ggplot(aes(x = AGE, y = avg_premium))+
   geom_point()
+
+save_plot(p_premium_by_age, "30_premium_by_age_scatter.png")
+print(p_premium_by_age)
 
 # =============================================================================
 # END OF SCRIPT
@@ -2047,7 +2210,7 @@ premium_puma <- h1b_merged$age_occ_ed_puma %>%
   calc_share_positive(age_grp) %>%
   filter(!is.na(age_grp), age_grp != "[65,Inf]")
 
-ggplot(premium_puma, aes(x = age_grp, y = share_positive)) +
+p_puma_share <- ggplot(premium_puma, aes(x = age_grp, y = share_positive)) +
   geom_col(width = 0.8, fill = ifp_colors$green) +
   geom_text(aes(label = percent(share_positive, accuracy = 1)), vjust = -0.4, size = 3.5) +
   scale_y_continuous(labels = percent, limits = c(0, 1), expand = expansion(mult = c(0, 0.08))) +
@@ -2061,12 +2224,15 @@ ggplot(premium_puma, aes(x = age_grp, y = share_positive)) +
   ) +
   theme_h1b()
 
+save_plot(p_puma_share, "09_share_positive_full_puma.png")
+print(p_puma_share)
+
 # --- Average Premium (Full Controls + PUMA) ---
 avg_puma <- h1b_merged$age_occ_ed_puma %>%
   calc_avg_premium(age_grp) %>%
   filter(!is.na(age_grp), age_grp != "[65,Inf]")
 
-ggplot(avg_puma, aes(x = age_grp, y = avg_premium)) +
+p_puma_avg <- ggplot(avg_puma, aes(x = age_grp, y = avg_premium)) +
   geom_col(width = 0.8, fill = ifp_colors$green) +
   geom_text(aes(
     label = ifelse(avg_premium >= 0, paste0("$", round(avg_premium/1000), "k"),
@@ -2084,6 +2250,9 @@ ggplot(avg_puma, aes(x = age_grp, y = avg_premium)) +
   ) +
   theme_h1b()
 
+save_plot(p_puma_avg, "10_avg_premium_full_puma.png")
+print(p_puma_avg)
+
 # --- Compare All Control Levels ---
 comparison_data <- bind_rows(
   h1b_merged$age_only %>% calc_share_positive(age_grp) %>% mutate(control = "Age Only"),
@@ -2096,7 +2265,7 @@ comparison_data <- bind_rows(
   mutate(control = factor(control, levels = c("Age Only", "Age + Education", "Age + Occupation", 
                                                "Full (Age + Occ + Ed)", "Full + PUMA")))
 
-ggplot(comparison_data, aes(x = age_grp, y = share_positive, color = control, group = control)) +
+p_comparison <- ggplot(comparison_data, aes(x = age_grp, y = share_positive, color = control, group = control)) +
   geom_line(linewidth = 1.2) +
   geom_point(size = 2.5) +
   scale_color_manual(values = c("Age Only" = ifp_colors$light_blue,
@@ -2116,6 +2285,8 @@ ggplot(comparison_data, aes(x = age_grp, y = share_positive, color = control, gr
   ) +
   theme_h1b() +
   theme(legend.position = "bottom")
+save_plot(p_comparison, "comparison_all_controls.png", width = 12, height = 7)
+print(p_comparison)
 
 # --- Overall Summary Statistics for PUMA Control ---
 overall_puma <- h1b_merged$age_occ_ed_puma %>%
@@ -2161,4 +2332,23 @@ summary_by_control <- bind_rows(
 
 knitr::kable(summary_by_control, caption = "H-1B Wage Premium by Control Configuration")
 
-cat("\nAnalysis complete! All control configurations have been evaluated.\n")
+# Save summary table
+write.csv(summary_by_control, file.path(output_tables, "summary_by_control.csv"), row.names = FALSE)
+cat("  Saved: summary_by_control.csv\n")
+
+cat("\n")
+cat("======================================================================\n")
+cat("                   ANALYSIS COMPLETE!\n")
+cat("======================================================================\n\n")
+cat("All control configurations have been evaluated including the new PUMA control.\n\n")
+cat("IMPORTANT NOTE ABOUT FIGURES:\n")
+cat("  This script creates 28 charts but only key charts are auto-saved.\n")
+cat("  Saved charts are in:", output_figures, "\n\n")
+cat("  To see ALL charts:\n")
+cat("    1. Run this script interactively in RStudio (line by line)\n")
+cat("    2. Or add explicit save commands for each chart\n\n")
+cat("KEY OUTPUTS:\n")
+cat("  - Comparison chart (all controls):", file.path(output_figures, "comparison_all_controls.png"), "\n")
+cat("  - Summary table:", file.path(output_tables, "summary_by_control.csv"), "\n\n")
+cat("Match rates for PUMA control are shown above in the diagnostics section.\n")
+cat("======================================================================\n\n")
