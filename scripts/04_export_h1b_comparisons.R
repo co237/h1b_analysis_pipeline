@@ -90,8 +90,6 @@ h1b <- h1b_data %>%
   ) %>%
   filter(!is.na(AGE), INCWAGE > 0, YEAR >= 2021) %>%
   mutate(
-    EDUCD = as.factor(EDUCD),
-    OCCSOC = as.factor(OCCSOC),
     age_grp = cut(AGE, breaks = c(20, 25, 30, 35, 40, 45, 50, 55, 60, 65),
                   right = FALSE, include.lowest = TRUE)
   )
@@ -112,7 +110,9 @@ natives <- acs_raw %>%
     YEAR,
     AGE,
     OCCSOC = as.character(as.numeric(OCCSOC)),
-    EDUCD,
+    # Collapse education codes to match H-1B mapping:
+    # 64 -> 63 (both = HS grad), <63 -> 1 (less than HS)
+    EDUCD = if_else(EDUCD == 64, 63L, if_else(EDUCD < 63, 1L, as.integer(EDUCD))),
     INCWAGE,
     PUMA = if("PUMA" %in% names(acs_raw) && "STATEFIP" %in% names(acs_raw)) {
       paste0(sprintf("%02d", as.integer(STATEFIP)), sprintf("%05d", as.integer(PUMA)))
@@ -123,8 +123,6 @@ natives <- acs_raw %>%
     PERWT
   ) %>%
   mutate(
-    EDUCD = as.factor(EDUCD),
-    OCCSOC = as.factor(OCCSOC),
     age_grp = cut(AGE, breaks = c(20, 25, 30, 35, 40, 45, 50, 55, 60, 65),
                   right = FALSE, include.lowest = TRUE)
   )
@@ -133,7 +131,11 @@ cat("  Native records prepared:", nrow(natives), "\n\n")
 
 # Combine panel
 panel <- bind_rows(h1b, natives) %>%
-  filter(INCWAGE > 0)
+  filter(INCWAGE > 0) %>%
+  mutate(
+    EDUCD = as.factor(EDUCD),
+    OCCSOC = as.factor(OCCSOC)
+  )
 
 cat("Combined panel size:", nrow(panel), "\n")
 cat("  H-1B workers:", sum(panel$H1B == 1), "\n")

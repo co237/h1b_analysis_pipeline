@@ -214,7 +214,8 @@ natives <- acs_raw %>%
   filter(
     CITIZEN %in% c(0, 1),                              # Native-born citizens
     INCWAGE > 0 & !INCWAGE %in% c(999998, 999999),    # Valid income
-    EMPSTAT == 1                                       # Employed
+    EMPSTAT == 1,                                      # Employed
+    AGE >= 20, AGE < 65                                # Same age range as H-1Bs
   ) %>%
   transmute(
     YEAR,
@@ -1044,7 +1045,8 @@ natives <- acs_raw %>%
   filter(
     CITIZEN %in% c(0, 1),
     INCWAGE > 0 & !INCWAGE %in% c(999998, 999999),
-    EMPSTAT == 1
+    EMPSTAT == 1,
+    AGE >= 20, AGE < 65  # Same age range as H-1Bs
   ) %>%
   transmute(
     YEAR,
