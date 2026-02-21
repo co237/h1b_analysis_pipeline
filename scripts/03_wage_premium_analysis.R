@@ -264,7 +264,7 @@ panel <- bind_rows(h1b, natives) %>%
     OCC2 = substr(as.character(OCCSOC), 1, 2),  # 2-digit SOC (major group)
     OCC3 = substr(as.character(OCCSOC), 1, 3),  # 3-digit SOC (minor group)
     age_grp = cut(AGE,
-                  breaks = c(20, 25, 30, 35, 40, 45, 50, 55, 60, 65, Inf),
+                  breaks = c(20, 25, 30, 35, 40, 45, 50, 55, 60, 65),
                   right = FALSE, include.lowest = TRUE)
   )
 
