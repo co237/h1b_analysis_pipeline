@@ -7,7 +7,7 @@
 # and gap magnitudes.
 #
 # Functional form (Murphy & Welch 1990, Lemieux 2006):
-#   ln(wage) ~ education_dummies + X + X^2 + X^3 + X^4 + year_FE
+#   ln(wage) ~ education_dummies + X + X^2 + X^3 + X^4
 # where X = potential experience = max(AGE - typical_schooling_years - 6, 0)
 #
 # Fit separately per 6-digit SOC occupation (fallback to 3-digit, 2-digit,
@@ -233,9 +233,7 @@ panel_mincer <- panel %>%
     X3 = X^3,
     X4 = X^4,
     ln_wage = log(INCWAGE),
-    EDUCD_f = factor(EDUCD_int),
-    YEAR_f = factor(YEAR),
-    YEAR_PUMA = paste0(YEAR, "_", PUMA)
+    EDUCD_f = factor(EDUCD_int)
   ) %>%
   filter(!is.na(S), !is.na(X), is.finite(ln_wage))
 
@@ -297,15 +295,12 @@ cat("  Pooled:     ", sum(h1b_df$match_level == "pooled"), "\n\n")
 
 # --- Helper: fit Mincer and predict ---
 fit_and_predict <- function(native_subset, h1b_subset) {
-  # Murphy-Welch quartic with education dummies + year FE
-  # Need at least a few more obs than parameters
+  # Murphy-Welch quartic with education dummies (no year FE -- enables future prediction)
   n_educ_levels <- n_distinct(native_subset$EDUCD_f)
-  n_year_levels <- n_distinct(native_subset$YEAR_f)
 
   # Build formula dynamically based on available variation
   rhs_parts <- c("X", "X2", "X3", "X4")
   if (n_educ_levels > 1) rhs_parts <- c(rhs_parts, "EDUCD_f")
-  if (n_year_levels > 1) rhs_parts <- c(rhs_parts, "YEAR_f")
 
   fml <- as.formula(paste("ln_wage ~", paste(rhs_parts, collapse = " + ")))
 
@@ -413,20 +408,18 @@ if (use_fixest) {
   # Helper for fixest-based fitting with PUMA FE
   fit_and_predict_puma <- function(native_subset, h1b_subset) {
     n_educ_levels <- n_distinct(native_subset$EDUCD_f)
-    n_puma_levels <- n_distinct(native_subset$YEAR_PUMA)
-    n_year_levels <- n_distinct(native_subset$YEAR_f)
+    n_puma_levels <- n_distinct(native_subset$PUMA)
 
     # Need enough PUMAs to justify FE; otherwise fall back to no-PUMA
     if (n_puma_levels < 3 || nrow(native_subset) < 100) {
       return(fit_and_predict(native_subset, h1b_subset))
     }
 
-    # Build fixest formula: covariates | fixed_effects
+    # Build fixest formula: covariates | fixed_effects (no year FE -- enables future prediction)
     rhs_parts <- c("X", "X2", "X3", "X4")
     if (n_educ_levels > 1) rhs_parts <- c(rhs_parts, "EDUCD_f")
 
-    fe_parts <- "YEAR_PUMA"
-    if (n_year_levels > 1) fe_parts <- c(fe_parts, "YEAR_f")
+    fe_parts <- "PUMA"
 
     fml <- as.formula(paste("ln_wage ~", paste(rhs_parts, collapse = " + "),
                             "|", paste(fe_parts, collapse = " + ")))
@@ -546,10 +539,8 @@ for (i in 1:nrow(top_occs)) {
 
   # Build formula (same logic as fit_and_predict)
   n_educ_levels <- n_distinct(native_sub$EDUCD_f)
-  n_year_levels <- n_distinct(native_sub$YEAR_f)
   rhs_parts <- c("X", "X2", "X3", "X4")
   if (n_educ_levels > 1) rhs_parts <- c(rhs_parts, "EDUCD_f")
-  if (n_year_levels > 1) rhs_parts <- c(rhs_parts, "YEAR_f")
   fml <- as.formula(paste("ln_wage ~", paste(rhs_parts, collapse = " + ")))
 
   fit <- tryCatch(lm(fml, data = native_sub, weights = PERWT), error = function(e) NULL)
@@ -643,7 +634,7 @@ p_diag <- occ_diag_table %>%
   scale_x_continuous(labels = percent, limits = c(0, max(occ_diag_table$R2, na.rm = TRUE) * 1.1)) +
   labs(
     title = "Mincer Model R-squared for Top 30 H-1B Occupations",
-    subtitle = "Fit on native-born workers; Murphy-Welch quartic + education dummies + year FE",
+    subtitle = "Fit on native-born workers; Murphy-Welch quartic + education dummies",
     x = expression(R^2),
     y = NULL,
     caption = "Source: 2021-2023 ACS via IPUMS. Point size = native-born sample size."
@@ -825,7 +816,7 @@ p3 <- ggplot(age_gaps, aes(x = age_grp, y = share_positive)) +
   scale_x_discrete(labels = age_labels) +
   labs(
     title = "Share of H-1Bs Earning More Than Predicted Native Wage, by Age",
-    subtitle = "Mincer prediction: occupation-specific, education + quartic experience + year FE",
+    subtitle = "Mincer prediction: occupation-specific, education + quartic experience",
     x = "Age of H-1B recipient",
     y = "Share with positive wage gap",
     caption = "Source: FY 2022-2024 H-1B data; 2021-2023 ACS via IPUMS"
