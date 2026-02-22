@@ -1344,13 +1344,3 @@ write.csv(final_final, file = cleaned_h1b_file, row.names = FALSE)
 cat("Cleaned H-1B data saved to:", cleaned_h1b_file, "\n")
 cat("\nData cleaning complete!\n")
 cat("Next step: Run 02_geocode_to_pumas.R to add PUMA codes\n")
-
-h1b_merged$full %>%
-  mutate(premium = INCWAGE - Native,
-         pos_neg = ifelse(premium>0,1,0)) %>%
-  filter(H1B == 1) %>%
-  group_by(YEAR, pos_neg) %>%
-  summarise(n = n()) %>%
-  pivot_wider(names_from = pos_neg,
-              values_from = n) %>%
-  mutate(share_positive = `1`/(`1`+`0`))
