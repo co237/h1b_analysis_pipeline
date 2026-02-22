@@ -243,6 +243,72 @@ cat("  Native-born:", sum(panel_mincer$H1B == 0), "\n")
 cat("  Mean years of schooling:", round(mean(panel_mincer$S), 1), "\n")
 cat("  Mean potential experience:", round(mean(panel_mincer$X), 1), "\n\n")
 
+# =============================================================================
+# 4b. Compute Occupation Wage Percentiles from ALL ACS Workers
+# =============================================================================
+# Needed for NPRM wage floor analysis. Uses ALL employed ACS workers (not just
+# native-born) because DOL wage levels are based on the full occupation
+# wage distribution.
+
+cat("--- Computing Occupation Wage Percentiles (all ACS workers) ---\n")
+
+# Weighted quantile helper (no extra package dependency)
+weighted_quantile <- function(x, w, probs) {
+  ord <- order(x)
+  x <- x[ord]; w <- w[ord]
+  cum_w <- cumsum(w) / sum(w)
+  sapply(probs, function(p) x[which.max(cum_w >= p)])
+}
+
+pctiles_needed <- c(0.17, 0.34, 0.35, 0.50, 0.53, 0.67, 0.72, 0.90)
+pctile_names   <- paste0("p", c(17, 34, 35, 50, 53, 67, 72, 90))
+
+# All employed ACS workers with valid income (no citizenship filter)
+# Year-specific so each H-1B cohort is compared to its matched ACS year
+acs_all_workers <- acs_raw %>%
+  filter(
+    INCWAGE > 0, !INCWAGE %in% c(999998, 999999),
+    EMPSTAT == 1,
+    AGE >= 20, AGE < 65
+  ) %>%
+  transmute(
+    YEAR,
+    OCCSOC = as.character(OCCSOC),
+    OCC3 = substr(as.character(OCCSOC), 1, 3),
+    INCWAGE, PERWT
+  )
+
+cat(sprintf("  All ACS workers for percentiles: %s\n", format(nrow(acs_all_workers), big.mark = ",")))
+
+# 6-digit SOC percentiles by year
+occ6_pctiles <- acs_all_workers %>%
+  group_by(YEAR, OCCSOC) %>%
+  filter(n() >= 30) %>%
+  summarise(
+    n_acs = n(),
+    across_pctiles = list(weighted_quantile(INCWAGE, PERWT, pctiles_needed)),
+    .groups = "drop"
+  ) %>%
+  mutate(across_pctiles = map(across_pctiles, ~ setNames(.x, pctile_names))) %>%
+  unnest_wider(across_pctiles)
+
+# 3-digit SOC percentiles by year (fallback)
+occ3_pctiles <- acs_all_workers %>%
+  group_by(YEAR, OCC3) %>%
+  filter(n() >= 30) %>%
+  summarise(
+    n_acs_3 = n(),
+    across_pctiles = list(weighted_quantile(INCWAGE, PERWT, pctiles_needed)),
+    .groups = "drop"
+  ) %>%
+  mutate(across_pctiles = map(across_pctiles, ~ setNames(.x, pctile_names))) %>%
+  unnest_wider(across_pctiles)
+
+cat(sprintf("  6-digit YEAR x SOC cells with >=30 workers: %d\n", nrow(occ6_pctiles)))
+cat(sprintf("  3-digit YEAR x SOC cells with >=30 workers: %d (fallback)\n\n", nrow(occ3_pctiles)))
+
+rm(acs_all_workers)
+
 # Free memory
 rm(h1b_raw, acs_raw, ddi, h1b, natives, panel)
 gc(verbose = FALSE)
@@ -585,40 +651,37 @@ cat("\n--- Building Summary Table ---\n")
 
 summary_rows <- list(
   tibble(
-    Specification = "Mincer: Occupation-specific (national)",
-    Sample_Size = n_valid_1,
-    Share_Positive = share_pos_1,
-    Avg_Gap = avg_gap_1,
-    Median_Gap = med_gap_1
+    Specification = "Mincer: Exp + Education (national)",
+    Sample_Size = spec1$n_valid,
+    Share_Positive = spec1$share_pos,
+    Avg_Gap = spec1$avg_gap,
+    Median_Gap = spec1$med_gap
+  ),
+  tibble(
+    Specification = "Mincer: Exp + Education + PUMA FE",
+    Sample_Size = spec2$n_valid,
+    Share_Positive = spec2$share_pos,
+    Avg_Gap = spec2$avg_gap,
+    Median_Gap = spec2$med_gap
   )
 )
 
-if (use_fixest) {
-  summary_rows[[2]] <- tibble(
-    Specification = "Mincer: Occupation-specific + PUMA FE",
-    Sample_Size = n_valid_2,
-    Share_Positive = share_pos_2,
-    Avg_Gap = avg_gap_2,
-    Median_Gap = med_gap_2
-  )
-}
-
 summary_table <- bind_rows(summary_rows)
 
-# Also add breakdowns by match level for Spec 1
+# Also add breakdowns by match level for Spec 2 (primary)
 match_summary <- h1b_df %>%
-  filter(!is.na(gap_1)) %>%
+  filter(!is.na(gap_2)) %>%
   group_by(match_level) %>%
   summarise(
     N = n(),
-    Share_Positive = mean(gap_1 > 0),
-    Avg_Gap = mean(gap_1),
-    Median_Gap = median(gap_1),
+    Share_Positive = mean(gap_2 > 0),
+    Avg_Gap = mean(gap_2),
+    Median_Gap = median(gap_2),
     .groups = "drop"
   ) %>%
   arrange(factor(match_level, levels = c("6-digit", "3-digit", "2-digit", "pooled")))
 
-cat("\nSpec 1 by match level:\n")
+cat("\nSpec 2 (with PUMA FE) by match level:\n")
 for (i in 1:nrow(match_summary)) {
   row <- match_summary[i, ]
   cat(sprintf("  %s: N=%s, %.1f%% positive, avg gap $%s\n",
@@ -649,11 +712,8 @@ cat("\n--- Exporting Individual Wage Gaps ---\n")
 export_cols <- c("YEAR", "AGE", "OCCSOC", "OCC2", "OCC3", "EDUCD_int",
                  "S", "X", "INCWAGE", "h1b_dependent", "wage_level",
                  "match_level", "match_occ",
-                 "predicted_wage_1", "gap_1", "log_gap_1")
-
-if (use_fixest) {
-  export_cols <- c(export_cols, "predicted_wage_2", "gap_2", "log_gap_2")
-}
+                 "predicted_wage_1", "gap_1", "log_gap_1",
+                 "predicted_wage_2", "gap_2", "log_gap_2")
 
 gaps_export <- h1b_df %>% select(all_of(export_cols))
 
@@ -667,8 +727,8 @@ cat(sprintf("Saved: output/tables/mincer_wage_gaps.csv (%s rows)\n",
 
 cat("\n=== Generating Figures ===\n")
 
-# Use Spec 1 as primary (full coverage), note Spec 2 where available
-h1b_plot <- h1b_df %>% filter(!is.na(gap_1))
+# Use Spec 2 (with PUMA FE) as primary
+h1b_plot <- h1b_df %>% filter(!is.na(gap_2))
 
 # --- Figure 1: Summary comparison (Mincer vs cell-median) ---
 # Load existing cell-median results if available
@@ -685,8 +745,8 @@ if (file.exists(cell_median_file)) {
     ),
     tibble(
       Method = "Mincer",
-      Control = c("Occ-Specific", if (use_fixest) "Occ-Specific + PUMA" else NULL),
-      Share_Positive = c(share_pos_1, if (use_fixest) share_pos_2 else NULL)
+      Control = c("Exp + Educ", "Exp + Educ + PUMA"),
+      Share_Positive = c(spec1$share_pos, spec2$share_pos)
     )
   ) %>%
     mutate(Control = factor(Control, levels = unique(Control)))
@@ -711,18 +771,18 @@ if (file.exists(cell_median_file)) {
 }
 
 # --- Figure 2: Distribution of individual wage gaps ---
-p2 <- ggplot(h1b_plot, aes(x = gap_1 / 1000)) +
+p2 <- ggplot(h1b_plot, aes(x = gap_2 / 1000)) +
   geom_histogram(binwidth = 5, fill = ifp_colors$dark_blue, color = "white",
                  alpha = 0.8, boundary = 0) +
   geom_vline(xintercept = 0, linetype = "dashed", color = ifp_colors$red, linewidth = 0.8) +
-  annotate("text", x = med_gap_1 / 1000, y = Inf, vjust = 2,
-           label = sprintf("Median: $%sk", round(med_gap_1 / 1000, 1)),
+  annotate("text", x = spec2$med_gap / 1000, y = Inf, vjust = 2,
+           label = sprintf("Median: $%sk", round(spec2$med_gap / 1000, 1)),
            color = ifp_colors$rich_black, size = 3.5) +
   scale_x_continuous(limits = c(-150, 200), labels = function(x) paste0("$", x, "k")) +
   labs(
     title = "Distribution of Individual H-1B Wage Gaps (Mincer Prediction)",
     subtitle = sprintf("%.1f%% of H-1Bs earn more than their predicted native-equivalent wage",
-                        share_pos_1 * 100),
+                        spec2$share_pos * 100),
     x = "Wage gap (actual H-1B wage - predicted native wage, $thousands)",
     y = "Number of H-1B workers",
     caption = "Source: FY 2022-2024 H-1B data; 2021-2023 ACS via IPUMS\nMincer: Murphy-Welch quartic, education dummies, fit per 6-digit SOC"
@@ -734,8 +794,8 @@ save_plot(p2, "mincer_02_gap_distribution.png")
 age_gaps <- h1b_plot %>%
   group_by(age_grp) %>%
   summarise(
-    share_positive = mean(gap_1 > 0),
-    avg_gap = mean(gap_1),
+    share_positive = mean(gap_2 > 0),
+    avg_gap = mean(gap_2),
     n = n(),
     .groups = "drop"
   ) %>%
@@ -763,8 +823,8 @@ wl_gaps <- h1b_plot %>%
   filter(wage_level %in% c("I", "II", "III", "IV")) %>%
   group_by(wage_level) %>%
   summarise(
-    share_positive = mean(gap_1 > 0),
-    avg_gap = mean(gap_1),
+    share_positive = mean(gap_2 > 0),
+    avg_gap = mean(gap_2),
     n = n(),
     .groups = "drop"
   )
@@ -789,7 +849,184 @@ p4 <- ggplot(wl_gaps, aes(x = wage_level, y = share_positive)) +
 save_plot(p4, "mincer_04_gap_by_wage_level.png")
 
 # =============================================================================
-# 9. Summary
+# 10. NPRM Wage Floor Counterfactual Analysis
+# =============================================================================
+
+cat("\n")
+cat("======================================================================\n")
+cat("       NPRM WAGE FLOOR COUNTERFACTUAL ANALYSIS\n")
+cat("======================================================================\n\n")
+
+# Use sample with valid predictions for BOTH specs (apples-to-apples)
+h1b_nprm <- h1b_df %>% filter(!is.na(gap_1) & !is.na(gap_2))
+baseline_n <- nrow(h1b_nprm)
+baseline_underpaid_1 <- mean(h1b_nprm$gap_1 < 0)
+baseline_underpaid_2 <- mean(h1b_nprm$gap_2 < 0)
+
+cat(sprintf("Baseline: %s H-1Bs with valid predictions for both specs\n",
+            format(baseline_n, big.mark = ",")))
+cat(sprintf("  Spec 1 (no geo FE):   %.1f%% underpaid\n", baseline_underpaid_1 * 100))
+cat(sprintf("  Spec 2 (with PUMA FE): %.1f%% underpaid\n\n", baseline_underpaid_2 * 100))
+
+# --- Merge year-specific occupation percentile floors onto H-1B data ---
+# Prefer 6-digit; fall back to 3-digit. Joined by YEAR so each H-1B cohort
+# is compared to its matched ACS year.
+h1b_nprm <- h1b_nprm %>%
+  left_join(occ6_pctiles %>% select(YEAR, OCCSOC, starts_with("p")),
+            by = c("YEAR", "OCCSOC"), suffix = c("", "_6")) %>%
+  left_join(occ3_pctiles %>% select(YEAR, OCC3, starts_with("p")),
+            by = c("YEAR", "OCC3"), suffix = c("", "_3"))
+
+# For each percentile column, use 6-digit if available, else 3-digit
+for (pn in pctile_names) {
+  col_3 <- paste0(pn, "_3")
+  h1b_nprm[[pn]] <- if_else(is.na(h1b_nprm[[pn]]), h1b_nprm[[col_3]], h1b_nprm[[pn]])
+}
+# Drop the _3 fallback columns
+h1b_nprm <- h1b_nprm %>% select(-ends_with("_3"))
+
+cat(sprintf("H-1Bs with occupation percentile data: %s / %s (%.1f%%)\n\n",
+            format(sum(!is.na(h1b_nprm$p50)), big.mark = ","),
+            format(baseline_n, big.mark = ","),
+            sum(!is.na(h1b_nprm$p50)) / baseline_n * 100))
+
+# --- Define scenarios ---
+# Each scenario computes a wage floor per H-1B worker
+h1b_nprm <- h1b_nprm %>%
+  mutate(
+    # Scenario 1: STATUS QUO level-specific (I→17th, II→34th, III→50th, IV→67th)
+    floor_s1 = case_when(
+      wage_level == "I"   ~ p17,
+      wage_level == "II"  ~ p34,
+      wage_level == "III" ~ p50,
+      wage_level == "IV"  ~ p67,
+      TRUE ~ NA_real_
+    ),
+    # Scenario 2: flat floor at 34th percentile of occupation
+    floor_s2 = p34,
+    # Scenario 3: flat floor at 50th percentile of occupation (occ median)
+    floor_s3 = p50,
+    # Scenario 4: NPRM proposed level-specific (I→35th, II→53rd, III→72nd, IV→90th)
+    floor_s4 = case_when(
+      wage_level == "I"   ~ p35,
+      wage_level == "II"  ~ p53,
+      wage_level == "III" ~ p72,
+      wage_level == "IV"  ~ p90,
+      TRUE ~ NA_real_
+    )
+  )
+
+# --- Run each scenario (reporting both specs) ---
+run_scenario <- function(data, floor_col, name) {
+  floor_vals <- data[[floor_col]]
+  has_floor <- !is.na(floor_vals)
+  eligible <- has_floor & (data$INCWAGE >= floor_vals)
+
+  n_with_floor <- sum(has_floor)
+  n_eligible <- sum(eligible)
+  n_screened <- n_with_floor - n_eligible
+  pct_screened <- n_screened / n_with_floor * 100
+
+  # Share underpaid among eligible under each spec
+  underpaid_1 <- mean(data$gap_1[eligible] < 0)
+  underpaid_2 <- mean(data$gap_2[eligible] < 0)
+
+  cat(sprintf("%-45s  %7s / %7s  Scrn: %5.1f%%  NoGeo: %5.1f%%  PUMA: %5.1f%%\n",
+              name,
+              format(n_eligible, big.mark = ","),
+              format(n_with_floor, big.mark = ","),
+              pct_screened, underpaid_1 * 100, underpaid_2 * 100))
+
+  tibble(
+    Scenario = name,
+    N_With_Floor = n_with_floor,
+    N_Eligible = n_eligible,
+    N_Screened = n_screened,
+    Pct_Screened = pct_screened,
+    Underpaid_NoGeo = underpaid_1,
+    Underpaid_PUMA = underpaid_2
+  )
+}
+
+cat(sprintf("%-45s  %17s  %9s  %8s  %8s\n",
+            "Scenario", "Eligible / Pool", "Screened", "No Geo", "PUMA FE"))
+cat(paste(rep("-", 105), collapse = ""), "\n")
+
+# Baseline row (no floor)
+baseline_row <- tibble(
+  Scenario = "Baseline (no wage floor)",
+  N_With_Floor = baseline_n,
+  N_Eligible = baseline_n,
+  N_Screened = 0L,
+  Pct_Screened = 0,
+  Underpaid_NoGeo = baseline_underpaid_1,
+  Underpaid_PUMA = baseline_underpaid_2
+)
+cat(sprintf("%-45s  %7s / %7s  Scrn: %5.1f%%  NoGeo: %5.1f%%  PUMA: %5.1f%%\n",
+            "Baseline (no wage floor)",
+            format(baseline_n, big.mark = ","),
+            format(baseline_n, big.mark = ","),
+            0.0, baseline_underpaid_1 * 100, baseline_underpaid_2 * 100))
+
+s1 <- run_scenario(h1b_nprm, "floor_s1", "S1: Status quo (17/34/50/67th)")
+s2 <- run_scenario(h1b_nprm, "floor_s2", "S2: Floor at 34th pctile")
+s3 <- run_scenario(h1b_nprm, "floor_s3", "S3: Floor at 50th pctile (occ median)")
+s4 <- run_scenario(h1b_nprm, "floor_s4", "S4: NPRM proposed (35/53/72/90th)")
+
+nprm_results <- bind_rows(baseline_row, s1, s2, s3, s4)
+
+# --- Save NPRM table ---
+nprm_out <- nprm_results %>%
+  mutate(
+    Pct_Screened = sprintf("%.1f%%", Pct_Screened),
+    Underpaid_NoGeo = sprintf("%.1f%%", Underpaid_NoGeo * 100),
+    Underpaid_PUMA = sprintf("%.1f%%", Underpaid_PUMA * 100),
+    N_With_Floor = format(N_With_Floor, big.mark = ","),
+    N_Eligible = format(N_Eligible, big.mark = ","),
+    N_Screened = format(N_Screened, big.mark = ",")
+  )
+write.csv(nprm_out, file.path(output_tables, "nprm_wage_floor_analysis.csv"), row.names = FALSE)
+cat("\nSaved: output/tables/nprm_wage_floor_analysis.csv\n")
+
+# --- Figure 6: NPRM scenario comparison (both specs) ---
+scenario_labels <- c("Baseline\n(no floor)",
+                      "S1: Status quo\n(17/34/50/67)",
+                      "S2: 34th pctile",
+                      "S3: 50th pctile\n(occ median)",
+                      "S4: NPRM proposed\n(35/53/72/90)")
+
+p6_data <- nprm_results %>%
+  mutate(Scenario_short = factor(scenario_labels, levels = scenario_labels)) %>%
+  pivot_longer(cols = c(Underpaid_NoGeo, Underpaid_PUMA),
+               names_to = "Spec", values_to = "Share_Underpaid") %>%
+  mutate(Spec = if_else(Spec == "Underpaid_NoGeo",
+                         "No geographic FE", "With PUMA FE"))
+
+p6 <- ggplot(p6_data, aes(x = Scenario_short, y = Share_Underpaid, fill = Spec)) +
+  geom_col(position = position_dodge(width = 0.7), width = 0.65) +
+  geom_text(aes(label = sprintf("%.1f%%", Share_Underpaid * 100)),
+            position = position_dodge(width = 0.7), vjust = -0.4, size = 3) +
+  geom_hline(yintercept = 0.5, linetype = "dotted", color = "gray50", linewidth = 0.4) +
+  scale_fill_manual(values = c("No geographic FE" = ifp_colors$light_blue,
+                                "With PUMA FE" = ifp_colors$dark_blue)) +
+  scale_y_continuous(labels = percent, limits = c(0, 0.75),
+                     expand = expansion(mult = c(0, 0.05))) +
+  labs(
+    title = "Share of H-1Bs Underpaid Under Different Wage Floor Policies",
+    subtitle = "Underpaid = actual wage < Mincer-predicted native-equivalent wage",
+    x = "Wage Floor Policy",
+    y = "Share of eligible H-1Bs that are underpaid",
+    fill = "Mincer Specification",
+    caption = paste0("Source: FY 2022-2024 H-1B data; 2021-2023 ACS via IPUMS\n",
+                      "Wage floors = percentiles of ALL workers in each 6-digit SOC (3-digit fallback)")
+  ) +
+  theme_h1b() +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5, size = 9),
+        legend.position = "top")
+save_plot(p6, "mincer_06_nprm_scenarios.png", width = 12, height = 7)
+
+# =============================================================================
+# 11. Summary
 # =============================================================================
 
 cat("\n")
@@ -798,19 +1035,19 @@ cat("              MINCER ANALYSIS COMPLETE\n")
 cat("======================================================================\n\n")
 
 cat("KEY RESULTS (Spec 1: Occupation-specific, national):\n")
-cat(sprintf("  H-1B workers analyzed: %s\n", format(n_valid_1, big.mark = ",")))
-cat(sprintf("  Share earning MORE than predicted native: %.1f%%\n", share_pos_1 * 100))
-cat(sprintf("  Share earning LESS than predicted native: %.1f%%\n", (1 - share_pos_1) * 100))
-cat(sprintf("  Average wage gap: $%s\n", format(round(avg_gap_1), big.mark = ",")))
-cat(sprintf("  Median wage gap: $%s\n", format(round(med_gap_1), big.mark = ",")))
+cat(sprintf("  H-1B workers analyzed: %s\n", format(spec1$n_valid, big.mark = ",")))
+cat(sprintf("  Share earning MORE than predicted native: %.1f%%\n", spec1$share_pos * 100))
+cat(sprintf("  Share earning LESS than predicted native: %.1f%%\n", (1 - spec1$share_pos) * 100))
+cat(sprintf("  Average wage gap: $%s\n", format(round(spec1$avg_gap), big.mark = ",")))
+cat(sprintf("  Median wage gap: $%s\n", format(round(spec1$med_gap), big.mark = ",")))
 
 if (use_fixest) {
   cat(sprintf("\nKEY RESULTS (Spec 2: Occupation-specific + PUMA FE):\n"))
-  cat(sprintf("  H-1B workers analyzed: %s\n", format(n_valid_2, big.mark = ",")))
-  cat(sprintf("  Share earning MORE than predicted native: %.1f%%\n", share_pos_2 * 100))
-  cat(sprintf("  Share earning LESS than predicted native: %.1f%%\n", (1 - share_pos_2) * 100))
-  cat(sprintf("  Average wage gap: $%s\n", format(round(avg_gap_2), big.mark = ",")))
-  cat(sprintf("  Median wage gap: $%s\n", format(round(med_gap_2), big.mark = ",")))
+  cat(sprintf("  H-1B workers analyzed: %s\n", format(spec2$n_valid, big.mark = ",")))
+  cat(sprintf("  Share earning MORE than predicted native: %.1f%%\n", spec2$share_pos * 100))
+  cat(sprintf("  Share earning LESS than predicted native: %.1f%%\n", (1 - spec2$share_pos) * 100))
+  cat(sprintf("  Average wage gap: $%s\n", format(round(spec2$avg_gap), big.mark = ",")))
+  cat(sprintf("  Median wage gap: $%s\n", format(round(spec2$med_gap), big.mark = ",")))
 }
 
 cat("\nOutputs:\n")
@@ -818,9 +1055,11 @@ cat("  Tables: ", output_tables, "\n")
 cat("    - mincer_summary.csv\n")
 cat("    - mincer_wage_gaps.csv\n")
 cat("    - mincer_occ_diagnostics.csv\n")
+cat("    - nprm_wage_floor_analysis.csv\n")
 cat("  Figures:", output_figures, "\n")
 cat("    - mincer_01_summary_comparison.png\n")
 cat("    - mincer_02_gap_distribution.png\n")
 cat("    - mincer_03_gap_by_age.png\n")
 cat("    - mincer_04_gap_by_wage_level.png\n")
-cat("    - mincer_05_occ_diagnostics.png\n\n")
+cat("    - mincer_05_occ_diagnostics.png\n")
+cat("    - mincer_06_nprm_scenarios.png\n\n")
