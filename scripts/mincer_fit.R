@@ -293,12 +293,11 @@ cat("  3-digit SOC:", sum(h1b_df$match_level == "3-digit"), "\n")
 cat("  2-digit SOC:", sum(h1b_df$match_level == "2-digit"), "\n")
 cat("  Pooled:     ", sum(h1b_df$match_level == "pooled"), "\n\n")
 
-# --- Helper: fit Mincer and predict ---
-fit_and_predict <- function(native_subset, h1b_subset) {
-  # Murphy-Welch quartic with education dummies (no year FE -- enables future prediction)
+# --- Helper: fit Mincer without PUMA FE (fallback for small occupations) ---
+fit_and_predict_nopuma <- function(native_subset, h1b_subset) {
+  # Murphy-Welch quartic with education dummies, no geographic controls
   n_educ_levels <- n_distinct(native_subset$EDUCD_f)
 
-  # Build formula dynamically based on available variation
   rhs_parts <- c("X", "X2", "X3", "X4")
   if (n_educ_levels > 1) rhs_parts <- c(rhs_parts, "EDUCD_f")
 
@@ -313,197 +312,132 @@ fit_and_predict <- function(native_subset, h1b_subset) {
 
   tryCatch(
     predict(fit, newdata = h1b_subset),
-    error = function(e) {
-      # If prediction fails (e.g., new factor levels), return NA
-      rep(NA_real_, nrow(h1b_subset))
-    }
+    error = function(e) rep(NA_real_, nrow(h1b_subset)))
+}
+
+# --- Primary helper: fit Mincer with PUMA FE (falls back to no-PUMA) ---
+fit_and_predict <- function(native_subset, h1b_subset) {
+  # Murphy-Welch quartic + education dummies + PUMA FE
+  # Controls for experience, education, and local labor market
+  n_educ_levels <- n_distinct(native_subset$EDUCD_f)
+  n_puma_levels <- n_distinct(native_subset$PUMA[!is.na(native_subset$PUMA)])
+
+  # Need enough PUMAs to justify FE; otherwise fall back to no-PUMA
+  if (!use_fixest || n_puma_levels < 3 || nrow(native_subset) < 100) {
+    return(fit_and_predict_nopuma(native_subset, h1b_subset))
+  }
+
+  # Build fixest formula: covariates | PUMA fixed effects
+  rhs_parts <- c("X", "X2", "X3", "X4")
+  if (n_educ_levels > 1) rhs_parts <- c(rhs_parts, "EDUCD_f")
+
+  fml <- as.formula(paste("ln_wage ~", paste(rhs_parts, collapse = " + "), "| PUMA"))
+
+  fit <- tryCatch(
+    feols(fml, data = native_subset, weights = ~PERWT, notes = FALSE, warn = FALSE),
+    error = function(e) NULL
+  )
+
+  if (is.null(fit)) return(fit_and_predict_nopuma(native_subset, h1b_subset))
+
+  tryCatch(
+    predict(fit, newdata = h1b_subset),
+    error = function(e) fit_and_predict_nopuma(native_subset, h1b_subset)
   )
 }
 
-# --- Spec 1: National (no PUMA FE) ---
-cat("=== Specification 1: National (by occupation) ===\n")
+# --- Fit helper: run one spec across all occupation levels ---
+run_spec <- function(h1b_data, natives_data, fit_fn, spec_name,
+                     occ6, occ3, occ2) {
+  cat(sprintf("=== %s ===\n", spec_name))
+
+  pred_col <- rep(NA_real_, nrow(h1b_data))
+
+  # 6-digit level
+  cat(sprintf("  Fitting %d 6-digit occupation models...\n", length(occ6)))
+  for (i in seq_along(occ6)) {
+    occ <- occ6[i]
+    idx <- which(h1b_data$OCCSOC == occ & h1b_data$match_level == "6-digit")
+    if (length(idx) == 0) next
+    native_sub <- natives_data %>% filter(OCCSOC == occ)
+    pred_col[idx] <- fit_fn(native_sub, h1b_data[idx, ])
+    if (i %% 50 == 0 || i == length(occ6))
+      cat(sprintf("    [%d/%d] occupations fitted\r", i, length(occ6)))
+  }
+  cat("\n")
+
+  # 3-digit level
+  cat(sprintf("  Fitting %d 3-digit occupation models...\n", length(occ3)))
+  for (occ in occ3) {
+    idx <- which(h1b_data$OCC3 == occ & h1b_data$match_level == "3-digit")
+    if (length(idx) == 0) next
+    native_sub <- natives_data %>% filter(OCC3 == occ)
+    pred_col[idx] <- fit_fn(native_sub, h1b_data[idx, ])
+  }
+
+  # 2-digit level
+  cat(sprintf("  Fitting %d 2-digit occupation models...\n", length(occ2)))
+  for (occ in occ2) {
+    idx <- which(h1b_data$OCC2 == occ & h1b_data$match_level == "2-digit")
+    if (length(idx) == 0) next
+    native_sub <- natives_data %>% filter(OCC2 == occ)
+    pred_col[idx] <- fit_fn(native_sub, h1b_data[idx, ])
+  }
+
+  # Pooled
+  pooled_idx <- which(h1b_data$match_level == "pooled")
+  if (length(pooled_idx) > 0) {
+    cat(sprintf("  Fitting pooled model for %d remaining H-1Bs...\n", length(pooled_idx)))
+    pred_col[pooled_idx] <- fit_fn(natives_data, h1b_data[pooled_idx, ])
+  }
+
+  # Compute gaps
+  predicted_wage <- exp(pred_col)
+  gap <- h1b_data$INCWAGE - predicted_wage
+  n_valid <- sum(!is.na(gap))
+  share_pos <- mean(gap > 0, na.rm = TRUE)
+  avg_gap_val <- mean(gap, na.rm = TRUE)
+  med_gap_val <- median(gap, na.rm = TRUE)
+
+  cat(sprintf("\n%s Results:\n", spec_name))
+  cat(sprintf("  Valid predictions: %s / %s (%.1f%%)\n",
+              format(n_valid, big.mark = ","),
+              format(nrow(h1b_data), big.mark = ","),
+              n_valid / nrow(h1b_data) * 100))
+  cat(sprintf("  Share with positive gap: %.1f%%\n", share_pos * 100))
+  cat(sprintf("  Average gap: $%s\n", format(round(avg_gap_val), big.mark = ",")))
+  cat(sprintf("  Median gap: $%s\n\n", format(round(med_gap_val), big.mark = ",")))
+
+  list(predicted_ln_wage = pred_col, predicted_wage = predicted_wage,
+       gap = gap, log_gap = h1b_df$ln_wage - pred_col,
+       n_valid = n_valid, share_pos = share_pos,
+       avg_gap = avg_gap_val, med_gap = med_gap_val)
+}
 
 # Get unique occupation groups to fit
 occ_groups_6 <- unique(h1b_df$OCCSOC[h1b_df$match_level == "6-digit"])
 occ_groups_3 <- unique(h1b_df$OCC3[h1b_df$match_level == "3-digit"])
 occ_groups_2 <- unique(h1b_df$OCC2[h1b_df$match_level == "2-digit"])
 
-h1b_df$predicted_ln_wage_1 <- NA_real_
+# --- Spec 1: Experience + Education (no PUMA FE) ---
+spec1 <- run_spec(h1b_df, natives_df, fit_and_predict_nopuma,
+                  "Spec 1: Experience + Education (national)",
+                  occ_groups_6, occ_groups_3, occ_groups_2)
 
-# Fit at 6-digit level
-cat(sprintf("  Fitting %d 6-digit occupation models...\n", length(occ_groups_6)))
-pb_total <- length(occ_groups_6)
-for (i in seq_along(occ_groups_6)) {
-  occ <- occ_groups_6[i]
-  idx_h1b <- which(h1b_df$OCCSOC == occ & h1b_df$match_level == "6-digit")
-  if (length(idx_h1b) == 0) next
+h1b_df$predicted_ln_wage_1 <- spec1$predicted_ln_wage
+h1b_df$predicted_wage_1    <- spec1$predicted_wage
+h1b_df$gap_1               <- spec1$gap
+h1b_df$log_gap_1           <- spec1$log_gap
 
-  native_sub <- natives_df %>% filter(OCCSOC == occ)
-  h1b_sub <- h1b_df[idx_h1b, ]
-  h1b_df$predicted_ln_wage_1[idx_h1b] <- fit_and_predict(native_sub, h1b_sub)
+# --- Spec 2: Experience + Education + PUMA FE ---
+spec2 <- run_spec(h1b_df, natives_df, fit_and_predict,
+                  "Spec 2: Experience + Education + PUMA FE",
+                  occ_groups_6, occ_groups_3, occ_groups_2)
 
-  if (i %% 50 == 0 || i == pb_total) {
-    cat(sprintf("    [%d/%d] occupations fitted\r", i, pb_total))
-  }
-}
-cat("\n")
-
-# Fit at 3-digit level
-cat(sprintf("  Fitting %d 3-digit occupation models...\n", length(occ_groups_3)))
-for (occ in occ_groups_3) {
-  idx_h1b <- which(h1b_df$OCC3 == occ & h1b_df$match_level == "3-digit")
-  if (length(idx_h1b) == 0) next
-
-  native_sub <- natives_df %>% filter(OCC3 == occ)
-  h1b_sub <- h1b_df[idx_h1b, ]
-  h1b_df$predicted_ln_wage_1[idx_h1b] <- fit_and_predict(native_sub, h1b_sub)
-}
-
-# Fit at 2-digit level
-cat(sprintf("  Fitting %d 2-digit occupation models...\n", length(occ_groups_2)))
-for (occ in occ_groups_2) {
-  idx_h1b <- which(h1b_df$OCC2 == occ & h1b_df$match_level == "2-digit")
-  if (length(idx_h1b) == 0) next
-
-  native_sub <- natives_df %>% filter(OCC2 == occ)
-  h1b_sub <- h1b_df[idx_h1b, ]
-  h1b_df$predicted_ln_wage_1[idx_h1b] <- fit_and_predict(native_sub, h1b_sub)
-}
-
-# Fit pooled model for remainder
-pooled_idx <- which(h1b_df$match_level == "pooled")
-if (length(pooled_idx) > 0) {
-  cat(sprintf("  Fitting pooled model for %d remaining H-1Bs...\n", length(pooled_idx)))
-  h1b_df$predicted_ln_wage_1[pooled_idx] <- fit_and_predict(natives_df, h1b_df[pooled_idx, ])
-}
-
-# Compute gaps for Spec 1
-h1b_df <- h1b_df %>%
-  mutate(
-    predicted_wage_1 = exp(predicted_ln_wage_1),
-    gap_1 = INCWAGE - predicted_wage_1,
-    log_gap_1 = ln_wage - predicted_ln_wage_1
-  )
-
-n_valid_1 <- sum(!is.na(h1b_df$gap_1))
-share_pos_1 <- mean(h1b_df$gap_1 > 0, na.rm = TRUE)
-avg_gap_1 <- mean(h1b_df$gap_1, na.rm = TRUE)
-med_gap_1 <- median(h1b_df$gap_1, na.rm = TRUE)
-
-cat(sprintf("\nSpec 1 Results (National, by occupation):\n"))
-cat(sprintf("  Valid predictions: %s / %s (%.1f%%)\n",
-            format(n_valid_1, big.mark = ","),
-            format(nrow(h1b_df), big.mark = ","),
-            n_valid_1 / nrow(h1b_df) * 100))
-cat(sprintf("  Share with positive gap: %.1f%%\n", share_pos_1 * 100))
-cat(sprintf("  Average gap: $%s\n", format(round(avg_gap_1), big.mark = ",")))
-cat(sprintf("  Median gap: $%s\n", format(round(med_gap_1), big.mark = ",")))
-
-# --- Spec 2: With PUMA FE (using fixest) ---
-if (use_fixest) {
-  cat("\n=== Specification 2: With PUMA FE (by occupation) ===\n")
-
-  h1b_df$predicted_ln_wage_2 <- NA_real_
-
-  # Helper for fixest-based fitting with PUMA FE
-  fit_and_predict_puma <- function(native_subset, h1b_subset) {
-    n_educ_levels <- n_distinct(native_subset$EDUCD_f)
-    n_puma_levels <- n_distinct(native_subset$PUMA)
-
-    # Need enough PUMAs to justify FE; otherwise fall back to no-PUMA
-    if (n_puma_levels < 3 || nrow(native_subset) < 100) {
-      return(fit_and_predict(native_subset, h1b_subset))
-    }
-
-    # Build fixest formula: covariates | fixed_effects (no year FE -- enables future prediction)
-    rhs_parts <- c("X", "X2", "X3", "X4")
-    if (n_educ_levels > 1) rhs_parts <- c(rhs_parts, "EDUCD_f")
-
-    fe_parts <- "PUMA"
-
-    fml <- as.formula(paste("ln_wage ~", paste(rhs_parts, collapse = " + "),
-                            "|", paste(fe_parts, collapse = " + ")))
-
-    fit <- tryCatch(
-      feols(fml, data = native_subset, weights = ~PERWT, notes = FALSE, warn = FALSE),
-      error = function(e) NULL
-    )
-
-    if (is.null(fit)) return(fit_and_predict(native_subset, h1b_subset))
-
-    tryCatch(
-      predict(fit, newdata = h1b_subset),
-      error = function(e) fit_and_predict(native_subset, h1b_subset)
-    )
-  }
-
-  # Fit at 6-digit level
-  cat(sprintf("  Fitting %d 6-digit occupation models with PUMA FE...\n", length(occ_groups_6)))
-  for (i in seq_along(occ_groups_6)) {
-    occ <- occ_groups_6[i]
-    idx_h1b <- which(h1b_df$OCCSOC == occ & h1b_df$match_level == "6-digit")
-    if (length(idx_h1b) == 0) next
-
-    native_sub <- natives_df %>% filter(OCCSOC == occ)
-    h1b_sub <- h1b_df[idx_h1b, ]
-    h1b_df$predicted_ln_wage_2[idx_h1b] <- fit_and_predict_puma(native_sub, h1b_sub)
-
-    if (i %% 50 == 0 || i == length(occ_groups_6)) {
-      cat(sprintf("    [%d/%d] occupations fitted\r", i, length(occ_groups_6)))
-    }
-  }
-  cat("\n")
-
-  # Fit at 3-digit level
-  cat(sprintf("  Fitting %d 3-digit models with PUMA FE...\n", length(occ_groups_3)))
-  for (occ in occ_groups_3) {
-    idx_h1b <- which(h1b_df$OCC3 == occ & h1b_df$match_level == "3-digit")
-    if (length(idx_h1b) == 0) next
-
-    native_sub <- natives_df %>% filter(OCC3 == occ)
-    h1b_sub <- h1b_df[idx_h1b, ]
-    h1b_df$predicted_ln_wage_2[idx_h1b] <- fit_and_predict_puma(native_sub, h1b_sub)
-  }
-
-  # Fit at 2-digit level
-  cat(sprintf("  Fitting %d 2-digit models with PUMA FE...\n", length(occ_groups_2)))
-  for (occ in occ_groups_2) {
-    idx_h1b <- which(h1b_df$OCC2 == occ & h1b_df$match_level == "2-digit")
-    if (length(idx_h1b) == 0) next
-
-    native_sub <- natives_df %>% filter(OCC2 == occ)
-    h1b_sub <- h1b_df[idx_h1b, ]
-    h1b_df$predicted_ln_wage_2[idx_h1b] <- fit_and_predict_puma(native_sub, h1b_sub)
-  }
-
-  # Pooled with PUMA FE
-  if (length(pooled_idx) > 0) {
-    cat(sprintf("  Fitting pooled model with PUMA FE for %d H-1Bs...\n", length(pooled_idx)))
-    h1b_df$predicted_ln_wage_2[pooled_idx] <- fit_and_predict_puma(natives_df, h1b_df[pooled_idx, ])
-  }
-
-  # Compute gaps for Spec 2
-  h1b_df <- h1b_df %>%
-    mutate(
-      predicted_wage_2 = exp(predicted_ln_wage_2),
-      gap_2 = INCWAGE - predicted_wage_2,
-      log_gap_2 = ln_wage - predicted_ln_wage_2
-    )
-
-  n_valid_2 <- sum(!is.na(h1b_df$gap_2))
-  share_pos_2 <- mean(h1b_df$gap_2 > 0, na.rm = TRUE)
-  avg_gap_2 <- mean(h1b_df$gap_2, na.rm = TRUE)
-  med_gap_2 <- median(h1b_df$gap_2, na.rm = TRUE)
-
-  cat(sprintf("\nSpec 2 Results (With PUMA FE, by occupation):\n"))
-  cat(sprintf("  Valid predictions: %s / %s (%.1f%%)\n",
-              format(n_valid_2, big.mark = ","),
-              format(nrow(h1b_df), big.mark = ","),
-              n_valid_2 / nrow(h1b_df) * 100))
-  cat(sprintf("  Share with positive gap: %.1f%%\n", share_pos_2 * 100))
-  cat(sprintf("  Average gap: $%s\n", format(round(avg_gap_2), big.mark = ",")))
-  cat(sprintf("  Median gap: $%s\n", format(round(med_gap_2), big.mark = ",")))
-}
+h1b_df$predicted_ln_wage_2 <- spec2$predicted_ln_wage
+h1b_df$predicted_wage_2    <- spec2$predicted_wage
+h1b_df$gap_2               <- spec2$gap
+h1b_df$log_gap_2           <- spec2$log_gap
 
 # =============================================================================
 # 5b. Model Diagnostics for Top H-1B Occupations
