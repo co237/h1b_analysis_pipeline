@@ -190,7 +190,7 @@ h1b <- h1b_raw %>%
     EDUCD = map_education_code(petition_beneficiary_edu_code),
     INCWAGE = petition_annual_pay_clean,
     h1b_dependent = petition_employer_h1b_dependent,
-    wage_level = wage_level_combined,
+    wage_level = PW_WAGE_LEVEL,
     PUMA = case_when(
       YEAR == 2021 ~ as.character(PUMA_2010),
       YEAR >= 2022 ~ as.character(PUMA_2020),
