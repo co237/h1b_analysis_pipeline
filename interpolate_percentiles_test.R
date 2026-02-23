@@ -190,4 +190,8 @@ h1b_22_24 <- h1b_22_24 %>%
          -h1b_wage)
 
 
+# Output CSV with percentiles and native wage comparisons. 
+write.csv(h1b_22_24, "h1b_with_percentiles_and_native_comps.csv")
 
+
+     
