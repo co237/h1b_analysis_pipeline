@@ -8,6 +8,18 @@
 # --- Project Paths ---
 # Get the directory where this config file is located
 # This should be the project root
+# Helper: walk up from a candidate directory until we find config.R
+find_project_root <- function(start_dir) {
+  dir <- normalizePath(start_dir, mustWork = FALSE)
+  while (nchar(dir) > 1) {
+    if (file.exists(file.path(dir, "config.R"))) return(dir)
+    parent <- dirname(dir)
+    if (parent == dir) break
+    dir <- parent
+  }
+  return(start_dir)  # give up, return original
+}
+
 project_root <- tryCatch({
   # First, try to use the location of this config.R file
   if (exists("ofile") && !is.null(ofile)) {
@@ -18,7 +30,8 @@ project_root <- tryCatch({
     # Try rstudioapi if available
     active_doc <- tryCatch(rstudioapi::getActiveDocumentContext()$path, error = function(e) "")
     if (active_doc != "" && file.exists(active_doc)) {
-      dirname(active_doc)
+      # Active doc may be in a subdirectory (e.g. scripts/); walk up to find config.R
+      find_project_root(dirname(active_doc))
     } else {
       getwd()
     }
@@ -39,7 +52,7 @@ if (is.null(project_root) || project_root == "" || !dir.exists(project_root)) {
 # Final validation: if we still have an invalid path, stop with helpful message
 if (is.null(project_root) || project_root == "" || !dir.exists(project_root)) {
   stop("Cannot determine project root directory. Please set working directory:\n",
-       "  setwd('/Users/connorobrien/Documents/GitHub/h1b_analysis_pipeline')")
+       "  setwd('/Users/jeremy/Documents/GitHub/h1b_analysis_pipeline')")
 }
 
 # Main data directories
