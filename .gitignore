@@ -8,6 +8,9 @@
 data/raw/*
 data/intermediate/*
 data/processed/*
+data/*.zip
+data/h1b_analysis_pipeline_data/
+data/output/
 
 # Keep README files that explain where to get data
 !data/raw/README.md
@@ -19,6 +22,7 @@ data/processed/*
 .RData
 .Rproj.user
 *.Rproj
+Rplots.pdf
 
 # Output files (can be regenerated or stored in Google Drive)
 output/figures/*
@@ -40,6 +44,7 @@ output/tables/*
 .DS_Store?
 ._*
 Thumbs.db
+__MACOSX/
 
 # Temporary files
 *.tmp
