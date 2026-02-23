@@ -10,8 +10,8 @@
 #   ln(wage) ~ education_dummies + X + X^2 + X^3 + X^4
 # where X = potential experience = max(AGE - typical_schooling_years - 6, 0)
 #
-# Fit separately per 6-digit SOC occupation (fallback to 3-digit, 2-digit,
-# then pooled if sample too small).
+# Fit separately per 6-digit SOC occupation (fallback to 5-digit, 3-digit,
+# 2-digit, then pooled if sample too small).
 #
 # Input:  data/processed/h1b_fy21_24_with_pumas.csv, IPUMS ACS microdata
 # Output: output/tables/mincer_summary.csv, mincer_wage_gaps.csv
@@ -295,7 +295,7 @@ weighted_quantile <- function(x, w, probs) {
 
 # Fixed percentiles for S1-S3 scenarios, combined with user-specified NPRM (S4)
 all_pctile_ints <- sort(unique(c(17, 34, 50, 67,              # S1: status quo
-                                  nprm_L1, nprm_L2, nprm_L3, nprm_L4)))  # S4: NPRM proposed
+                                 nprm_L1, nprm_L2, nprm_L3, nprm_L4)))  # S4: NPRM proposed
 pctiles_needed <- all_pctile_ints / 100
 pctile_names   <- paste0("p", all_pctile_ints)
 
@@ -310,6 +310,7 @@ acs_all_workers <- acs_raw %>%
   transmute(
     YEAR,
     OCCSOC = as.character(OCCSOC),
+    OCC5 = substr(as.character(OCCSOC), 1, 5),
     OCC3 = substr(as.character(OCCSOC), 1, 3),
     INCWAGE, PERWT
   )
@@ -328,7 +329,19 @@ occ6_pctiles <- acs_all_workers %>%
   mutate(across_pctiles = map(across_pctiles, ~ setNames(.x, pctile_names))) %>%
   unnest_wider(across_pctiles)
 
-# 3-digit SOC percentiles by year (fallback)
+# 5-digit SOC percentiles by year (first fallback)
+occ5_pctiles <- acs_all_workers %>%
+  group_by(YEAR, OCC5) %>%
+  filter(n() >= 30) %>%
+  summarise(
+    n_acs_5 = n(),
+    across_pctiles = list(weighted_quantile(INCWAGE, PERWT, pctiles_needed)),
+    .groups = "drop"
+  ) %>%
+  mutate(across_pctiles = map(across_pctiles, ~ setNames(.x, pctile_names))) %>%
+  unnest_wider(across_pctiles)
+
+# 3-digit SOC percentiles by year (second fallback)
 occ3_pctiles <- acs_all_workers %>%
   group_by(YEAR, OCC3) %>%
   filter(n() >= 30) %>%
@@ -341,6 +354,7 @@ occ3_pctiles <- acs_all_workers %>%
   unnest_wider(across_pctiles)
 
 cat(sprintf("  6-digit YEAR x SOC cells with >=30 workers: %d\n", nrow(occ6_pctiles)))
+cat(sprintf("  5-digit YEAR x SOC cells with >=30 workers: %d (fallback)\n", nrow(occ5_pctiles)))
 cat(sprintf("  3-digit YEAR x SOC cells with >=30 workers: %d (fallback)\n\n", nrow(occ3_pctiles)))
 
 rm(acs_all_workers)
@@ -405,19 +419,19 @@ cat("  Pooled:     ", sum(h1b_df$match_level == "pooled"), "\n\n")
 fit_and_predict_nopuma <- function(native_subset, h1b_subset) {
   # Murphy-Welch quartic with education dummies, no geographic controls
   n_educ_levels <- n_distinct(native_subset$EDUCD_f)
-
+  
   rhs_parts <- c("X", "X2", "X3", "X4")
   if (n_educ_levels > 1) rhs_parts <- c(rhs_parts, "EDUCD_f")
-
+  
   fml <- as.formula(paste("ln_wage ~", paste(rhs_parts, collapse = " + ")))
-
+  
   fit <- tryCatch(
     lm(fml, data = native_subset, weights = PERWT),
     error = function(e) NULL
   )
-
+  
   if (is.null(fit)) return(rep(NA_real_, nrow(h1b_subset)))
-
+  
   tryCatch(
     predict(fit, newdata = h1b_subset),
     error = function(e) rep(NA_real_, nrow(h1b_subset)))
@@ -429,25 +443,25 @@ fit_and_predict <- function(native_subset, h1b_subset) {
   # Controls for experience, education, and local labor market
   n_educ_levels <- n_distinct(native_subset$EDUCD_f)
   n_puma_levels <- n_distinct(native_subset$PUMA[!is.na(native_subset$PUMA)])
-
+  
   # Need enough PUMAs to justify FE; otherwise fall back to no-PUMA
   if (!use_fixest || n_puma_levels < 3 || nrow(native_subset) < 100) {
     return(fit_and_predict_nopuma(native_subset, h1b_subset))
   }
-
+  
   # Build fixest formula: covariates | PUMA fixed effects
   rhs_parts <- c("X", "X2", "X3", "X4")
   if (n_educ_levels > 1) rhs_parts <- c(rhs_parts, "EDUCD_f")
-
+  
   fml <- as.formula(paste("ln_wage ~", paste(rhs_parts, collapse = " + "), "| PUMA"))
-
+  
   fit <- tryCatch(
     feols(fml, data = native_subset, weights = ~PERWT, notes = FALSE, warn = FALSE),
     error = function(e) NULL
   )
-
+  
   if (is.null(fit)) return(fit_and_predict_nopuma(native_subset, h1b_subset))
-
+  
   tryCatch(
     predict(fit, newdata = h1b_subset),
     error = function(e) fit_and_predict_nopuma(native_subset, h1b_subset)
@@ -458,9 +472,9 @@ fit_and_predict <- function(native_subset, h1b_subset) {
 run_spec <- function(h1b_data, natives_data, fit_fn, spec_name,
                      occ6, occ5, occ3, occ2) {
   cat(sprintf("=== %s ===\n", spec_name))
-
+  
   pred_col <- rep(NA_real_, nrow(h1b_data))
-
+  
   # 6-digit level
   cat(sprintf("  Fitting %d 6-digit occupation models...\n", length(occ6)))
   for (i in seq_along(occ6)) {
@@ -473,7 +487,7 @@ run_spec <- function(h1b_data, natives_data, fit_fn, spec_name,
       cat(sprintf("    [%d/%d] occupations fitted\r", i, length(occ6)))
   }
   cat("\n")
-
+  
   # 5-digit level
   cat(sprintf("  Fitting %d 5-digit occupation models...\n", length(occ5)))
   for (occ in occ5) {
@@ -482,7 +496,7 @@ run_spec <- function(h1b_data, natives_data, fit_fn, spec_name,
     native_sub <- natives_data %>% filter(OCC5 == occ)
     pred_col[idx] <- fit_fn(native_sub, h1b_data[idx, ])
   }
-
+  
   # 3-digit level
   cat(sprintf("  Fitting %d 3-digit occupation models...\n", length(occ3)))
   for (occ in occ3) {
@@ -491,7 +505,7 @@ run_spec <- function(h1b_data, natives_data, fit_fn, spec_name,
     native_sub <- natives_data %>% filter(OCC3 == occ)
     pred_col[idx] <- fit_fn(native_sub, h1b_data[idx, ])
   }
-
+  
   # 2-digit level
   cat(sprintf("  Fitting %d 2-digit occupation models...\n", length(occ2)))
   for (occ in occ2) {
@@ -500,14 +514,14 @@ run_spec <- function(h1b_data, natives_data, fit_fn, spec_name,
     native_sub <- natives_data %>% filter(OCC2 == occ)
     pred_col[idx] <- fit_fn(native_sub, h1b_data[idx, ])
   }
-
+  
   # Pooled
   pooled_idx <- which(h1b_data$match_level == "pooled")
   if (length(pooled_idx) > 0) {
     cat(sprintf("  Fitting pooled model for %d remaining H-1Bs...\n", length(pooled_idx)))
     pred_col[pooled_idx] <- fit_fn(natives_data, h1b_data[pooled_idx, ])
   }
-
+  
   # Compute gaps
   predicted_wage <- exp(pred_col)
   gap <- h1b_data$INCWAGE - predicted_wage
@@ -515,7 +529,7 @@ run_spec <- function(h1b_data, natives_data, fit_fn, spec_name,
   share_pos <- mean(gap > 0, na.rm = TRUE)
   avg_gap_val <- mean(gap, na.rm = TRUE)
   med_gap_val <- median(gap, na.rm = TRUE)
-
+  
   cat(sprintf("\n%s Results:\n", spec_name))
   cat(sprintf("  Valid predictions: %s / %s (%.1f%%)\n",
               format(n_valid, big.mark = ","),
@@ -524,7 +538,7 @@ run_spec <- function(h1b_data, natives_data, fit_fn, spec_name,
   cat(sprintf("  Share with positive gap: %.1f%%\n", share_pos * 100))
   cat(sprintf("  Average gap: $%s\n", format(round(avg_gap_val), big.mark = ",")))
   cat(sprintf("  Median gap: $%s\n\n", format(round(med_gap_val), big.mark = ",")))
-
+  
   list(predicted_ln_wage = pred_col, predicted_wage = predicted_wage,
        gap = gap, log_gap = h1b_df$ln_wage - pred_col,
        n_valid = n_valid, share_pos = share_pos,
@@ -584,31 +598,31 @@ for (i in 1:nrow(top_occs)) {
   occ <- top_occs$OCCSOC[i]
   occ_title <- top_occs$occ_title[i]
   n_h1b <- top_occs$n_h1b[i]
-
+  
   native_sub <- natives_df %>% filter(OCCSOC == occ)
   h1b_sub <- h1b_df %>% filter(OCCSOC == occ, match_level == "6-digit")
   n_native <- nrow(native_sub)
-
+  
   # Build formula (same logic as fit_and_predict)
   n_educ_levels <- n_distinct(native_sub$EDUCD_f)
   rhs_parts <- c("X", "X2", "X3", "X4")
   if (n_educ_levels > 1) rhs_parts <- c(rhs_parts, "EDUCD_f")
   fml <- as.formula(paste("ln_wage ~", paste(rhs_parts, collapse = " + ")))
-
+  
   fit <- tryCatch(lm(fml, data = native_sub, weights = PERWT), error = function(e) NULL)
-
+  
   if (is.null(fit)) next
-
+  
   fit_summary <- summary(fit)
   fit_glance <- glance(fit)
   fit_tidy <- tidy(fit)
-
+  
   # Extract experience coefficients
   x_coefs <- fit_tidy %>% filter(term %in% c("X", "X2", "X3", "X4"))
-
+  
   # Predict for H-1Bs and compute gap stats within this occupation
   h1b_preds <- tryCatch(predict(fit, newdata = h1b_sub), error = function(e) NULL)
-
+  
   share_pos_occ <- NA_real_
   avg_gap_occ <- NA_real_
   med_gap_occ <- NA_real_
@@ -623,7 +637,7 @@ for (i in 1:nrow(top_occs)) {
       med_gap_occ <- median(gaps_occ[valid])
     }
   }
-
+  
   occ_diagnostics[[i]] <- tibble(
     OCCSOC = occ,
     Title = occ_title,
@@ -787,7 +801,7 @@ h1b_plot <- h1b_df %>% filter(!is.na(gap_2))
 cell_median_file <- file.path(output_tables, "summary_by_control.csv")
 if (file.exists(cell_median_file)) {
   cell_median <- read.csv(cell_median_file, stringsAsFactors = FALSE)
-
+  
   comparison_data <- bind_rows(
     tibble(
       Method = "Cell Median",
@@ -802,7 +816,7 @@ if (file.exists(cell_median_file)) {
     )
   ) %>%
     mutate(Control = factor(Control, levels = unique(Control)))
-
+  
   p1 <- ggplot(comparison_data, aes(x = Control, y = Share_Positive, fill = Method)) +
     geom_col(position = "dodge", width = 0.7) +
     geom_text(aes(label = percent(Share_Positive, accuracy = 0.1)),
@@ -834,7 +848,7 @@ p2 <- ggplot(h1b_plot, aes(x = gap_2 / 1000)) +
   labs(
     title = "Distribution of Individual H-1B Wage Gaps (Mincer Prediction)",
     subtitle = sprintf("%.1f%% of H-1Bs earn more than their predicted native-equivalent wage",
-                        spec2$share_pos * 100),
+                       spec2$share_pos * 100),
     x = "Wage gap (actual H-1B wage - predicted native wage, $thousands)",
     y = "Number of H-1B workers",
     caption = "Source: FY 2022-2024 H-1B data; 2021-2023 ACS via IPUMS\nMincer: Murphy-Welch quartic, education dummies, fit per 6-digit SOC"
@@ -883,7 +897,7 @@ wl_gaps <- h1b_plot %>%
 
 p4 <- ggplot(wl_gaps, aes(x = wage_level, y = share_positive)) +
   geom_col(width = 0.7, fill = c(ifp_colors$light_blue, ifp_colors$purple,
-                                   ifp_colors$dark_blue, ifp_colors$rich_black)) +
+                                 ifp_colors$dark_blue, ifp_colors$rich_black)) +
   geom_text(aes(label = sprintf("%s\n(n=%s)", percent(share_positive, accuracy = 1),
                                 format(n, big.mark = ","))),
             vjust = -0.3, size = 3.2) +
@@ -921,21 +935,25 @@ cat(sprintf("  Spec 1 (no geo FE):   %.1f%% underpaid\n", baseline_underpaid_1 *
 cat(sprintf("  Spec 2 (with PUMA FE): %.1f%% underpaid\n\n", baseline_underpaid_2 * 100))
 
 # --- Merge year-specific occupation percentile floors onto H-1B data ---
-# Prefer 6-digit; fall back to 3-digit. Joined by YEAR so each H-1B cohort
-# is compared to its matched ACS year.
+# Prefer 6-digit; fall back to 5-digit, then 3-digit. Joined by YEAR so
+# each H-1B cohort is compared to its matched ACS year.
 h1b_nprm <- h1b_nprm %>%
   left_join(occ6_pctiles %>% select(YEAR, OCCSOC, starts_with("p")),
             by = c("YEAR", "OCCSOC"), suffix = c("", "_6")) %>%
+  left_join(occ5_pctiles %>% select(YEAR, OCC5, starts_with("p")),
+            by = c("YEAR", "OCC5"), suffix = c("", "_5")) %>%
   left_join(occ3_pctiles %>% select(YEAR, OCC3, starts_with("p")),
             by = c("YEAR", "OCC3"), suffix = c("", "_3"))
 
-# For each percentile column, use 6-digit if available, else 3-digit
+# For each percentile column, use 6-digit if available, else 5-digit, else 3-digit
 for (pn in pctile_names) {
+  col_5 <- paste0(pn, "_5")
   col_3 <- paste0(pn, "_3")
+  h1b_nprm[[pn]] <- if_else(is.na(h1b_nprm[[pn]]), h1b_nprm[[col_5]], h1b_nprm[[pn]])
   h1b_nprm[[pn]] <- if_else(is.na(h1b_nprm[[pn]]), h1b_nprm[[col_3]], h1b_nprm[[pn]])
 }
-# Drop the _3 fallback columns
-h1b_nprm <- h1b_nprm %>% select(-ends_with("_3"))
+# Drop the fallback columns
+h1b_nprm <- h1b_nprm %>% select(-ends_with("_5"), -ends_with("_3"))
 
 cat(sprintf("H-1Bs with occupation percentile data: %s / %s (%.1f%%)\n\n",
             format(sum(!is.na(h1b_nprm$p50)), big.mark = ","),
@@ -973,22 +991,22 @@ run_scenario <- function(data, floor_col, name) {
   floor_vals <- data[[floor_col]]
   has_floor <- !is.na(floor_vals)
   eligible <- has_floor & (data$INCWAGE >= floor_vals)
-
+  
   n_with_floor <- sum(has_floor)
   n_eligible <- sum(eligible)
   n_screened <- n_with_floor - n_eligible
   pct_screened <- n_screened / n_with_floor * 100
-
+  
   # Share underpaid among eligible under each spec
   underpaid_1 <- mean(data$gap_1[eligible] < 0)
   underpaid_2 <- mean(data$gap_2[eligible] < 0)
-
+  
   cat(sprintf("%-45s  %7s / %7s  Scrn: %5.1f%%  NoGeo: %5.1f%%  PUMA: %5.1f%%\n",
               name,
               format(n_eligible, big.mark = ","),
               format(n_with_floor, big.mark = ","),
               pct_screened, underpaid_1 * 100, underpaid_2 * 100))
-
+  
   tibble(
     Scenario = name,
     N_With_Floor = n_with_floor,
@@ -1043,16 +1061,16 @@ cat("\nSaved: output/tables/nprm_wage_floor_analysis.csv\n")
 
 # --- Figure 6: NPRM scenario comparison (both specs) ---
 scenario_labels <- c("Baseline\n(no floor)",
-                      "S1: Status quo\n(17/34/50/67)",
-                      "S2: 50th pctile\n(occ median)",
-                      sprintf("S3: NPRM proposed\n(%d/%d/%d/%d)", nprm_L1, nprm_L2, nprm_L3, nprm_L4))
+                     "S1: Status quo\n(17/34/50/67)",
+                     "S2: 50th pctile\n(occ median)",
+                     sprintf("S3: NPRM proposed\n(%d/%d/%d/%d)", nprm_L1, nprm_L2, nprm_L3, nprm_L4))
 
 p6_data <- nprm_results %>%
   mutate(Scenario_short = factor(scenario_labels, levels = scenario_labels)) %>%
   pivot_longer(cols = c(Underpaid_NoGeo, Underpaid_PUMA),
                names_to = "Spec", values_to = "Share_Underpaid") %>%
   mutate(Spec = if_else(Spec == "Underpaid_NoGeo",
-                         "No geographic FE", "With PUMA FE"))
+                        "No geographic FE", "With PUMA FE"))
 
 p6 <- ggplot(p6_data, aes(x = Scenario_short, y = Share_Underpaid, fill = Spec)) +
   geom_col(position = position_dodge(width = 0.7), width = 0.65) +
@@ -1060,7 +1078,7 @@ p6 <- ggplot(p6_data, aes(x = Scenario_short, y = Share_Underpaid, fill = Spec))
             position = position_dodge(width = 0.7), vjust = -0.4, size = 3) +
   geom_hline(yintercept = 0.5, linetype = "dotted", color = "gray50", linewidth = 0.4) +
   scale_fill_manual(values = c("No geographic FE" = ifp_colors$light_blue,
-                                "With PUMA FE" = ifp_colors$dark_blue)) +
+                               "With PUMA FE" = ifp_colors$dark_blue)) +
   scale_y_continuous(labels = percent, limits = c(0, 0.75),
                      expand = expansion(mult = c(0, 0.05))) +
   labs(
@@ -1070,7 +1088,7 @@ p6 <- ggplot(p6_data, aes(x = Scenario_short, y = Share_Underpaid, fill = Spec))
     y = "Share of eligible H-1Bs that are underpaid",
     fill = "Mincer Specification",
     caption = paste0("Source: FY 2022-2024 H-1B data; 2021-2023 ACS via IPUMS\n",
-                      "Wage floors = percentiles of ALL workers in each 6-digit SOC (3-digit fallback)")
+                     "Wage floors = percentiles of ALL workers in each 6-digit SOC (5-digit, then 3-digit fallback)")
   ) +
   theme_h1b() +
   theme(axis.text.x = element_text(angle = 0, hjust = 0.5, size = 9),

@@ -155,19 +155,19 @@ check_required_files <- function() {
     "SOC Crosswalk" = soc_crosswalk_file,
     "DOT-SOC" = dot_soc_file
   )
-
+  
   missing <- character(0)
   for (name in names(required_files)) {
     if (!file.exists(required_files[[name]])) {
       missing <- c(missing, paste0("  - ", name, ": ", required_files[[name]]))
     }
   }
-
+  
   if (length(missing) > 0) {
     warning("Missing required files:\n", paste(missing, collapse = "\n"))
     return(FALSE)
   }
-
+  
   cat("All required files found.\n")
   return(TRUE)
 }
@@ -178,7 +178,7 @@ create_directories <- function() {
             output_figures, output_tables, census_crosswalks_dir,
             lca_data_path, oflc_data_path,
             file.path(data_intermediate, "dot_matching"))
-
+  
   for (dir in dirs) {
     if (!dir.exists(dir)) {
       dir.create(dir, recursive = TRUE, showWarnings = FALSE)
