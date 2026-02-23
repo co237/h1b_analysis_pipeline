@@ -24,15 +24,47 @@ cat("       MINCER WAGE EQUATION -- INDIVIDUAL H-1B WAGE GAPS\n")
 cat("======================================================================\n\n")
 
 # =============================================================================
+# USER-CONFIGURABLE NPRM PARAMETERS
+# =============================================================================
+# Set the percentile thresholds for the NPRM proposed scenario (S4).
+# Each value is the percentile of the ALL-WORKER occupation wage distribution
+# that serves as the wage floor for H-1Bs at that DOL wage level.
+# Change these to model alternative proposals.
+nprm_L1 <- 35   # Level I   (entry-level)
+nprm_L2 <- 53   # Level II  (qualified)
+nprm_L3 <- 72   # Level III (experienced)
+nprm_L4 <- 90   # Level IV  (fully competent / highly experienced)
+# =============================================================================
+
+# =============================================================================
 # 1. Setup and Configuration
 # =============================================================================
 
 if (file.exists("config.R")) {
   source("config.R")
 } else if (file.exists("../config.R")) {
-  source("../config.R")
+  setwd("..")
+  source("config.R")
 } else {
   stop("Cannot find config.R. Please run from project root or scripts/ directory")
+}
+
+# config.R's auto-detection can pick up the wrong directory (e.g. RStudio API
+# returns active document's folder). It also creates directories, so we can't
+# just check dir.exists(). Instead, check if the actual data file exists.
+if (!file.exists(h1b_with_pumas_file)) {
+  project_root <- getwd()
+  data_dir <- file.path(project_root, "data")
+  data_raw <- file.path(data_dir, "raw")
+  data_intermediate <- file.path(data_dir, "intermediate")
+  data_processed <- file.path(data_dir, "processed")
+  output_dir <- file.path(project_root, "output")
+  output_figures <- file.path(output_dir, "figures")
+  output_tables <- file.path(output_dir, "tables")
+  h1b_with_pumas_file <- file.path(data_processed, "h1b_fy21_24_with_pumas.csv")
+  acs_ddi_file <- file.path(data_raw, "usa_00068.xml")
+  soc_definitions_file <- file.path(data_raw, "soc_2018_definitions.xlsx")
+  cat("Corrected project root to:", project_root, "\n")
 }
 
 library(ipumsr)
@@ -210,6 +242,7 @@ panel <- bind_rows(h1b, natives) %>%
     OCCSOC = as.character(OCCSOC),
     OCC2 = substr(OCCSOC, 1, 2),
     OCC3 = substr(OCCSOC, 1, 3),
+    OCC5 = substr(OCCSOC, 1, 5),
     age_grp = cut(AGE, breaks = c(20, 25, 30, 35, 40, 45, 50, 55, 60, 65),
                   right = FALSE, include.lowest = TRUE)
   )
@@ -260,8 +293,11 @@ weighted_quantile <- function(x, w, probs) {
   sapply(probs, function(p) x[which.max(cum_w >= p)])
 }
 
-pctiles_needed <- c(0.17, 0.34, 0.35, 0.50, 0.53, 0.67, 0.72, 0.90)
-pctile_names   <- paste0("p", c(17, 34, 35, 50, 53, 67, 72, 90))
+# Fixed percentiles for S1-S3 scenarios, combined with user-specified NPRM (S4)
+all_pctile_ints <- sort(unique(c(17, 34, 50, 67,              # S1: status quo
+                                  nprm_L1, nprm_L2, nprm_L3, nprm_L4)))  # S4: NPRM proposed
+pctiles_needed <- all_pctile_ints / 100
+pctile_names   <- paste0("p", all_pctile_ints)
 
 # All employed ACS workers with valid income (no citizenship filter)
 # Year-specific so each H-1B cohort is compared to its matched ACS year
@@ -327,26 +363,31 @@ h1b_df     <- panel_mincer %>% filter(H1B == 1)
 
 # Count natives per occupation at each level
 occ6_counts <- natives_df %>% count(OCCSOC, name = "n_natives_6")
+occ5_counts <- natives_df %>% count(OCC5, name = "n_natives_5")
 occ3_counts <- natives_df %>% count(OCC3, name = "n_natives_3")
 occ2_counts <- natives_df %>% count(OCC2, name = "n_natives_2")
 
 # Determine which level each H-1B gets matched at
 h1b_df <- h1b_df %>%
   left_join(occ6_counts, by = "OCCSOC") %>%
+  left_join(occ5_counts, by = "OCC5") %>%
   left_join(occ3_counts, by = "OCC3") %>%
   left_join(occ2_counts, by = "OCC2") %>%
   mutate(
     n_natives_6 = replace_na(n_natives_6, 0),
+    n_natives_5 = replace_na(n_natives_5, 0),
     n_natives_3 = replace_na(n_natives_3, 0),
     n_natives_2 = replace_na(n_natives_2, 0),
     match_level = case_when(
       n_natives_6 >= MIN_NATIVES ~ "6-digit",
+      n_natives_5 >= MIN_NATIVES ~ "5-digit",
       n_natives_3 >= MIN_NATIVES ~ "3-digit",
       n_natives_2 >= MIN_NATIVES ~ "2-digit",
       TRUE ~ "pooled"
     ),
     match_occ = case_when(
       match_level == "6-digit" ~ OCCSOC,
+      match_level == "5-digit" ~ OCC5,
       match_level == "3-digit" ~ OCC3,
       match_level == "2-digit" ~ OCC2,
       TRUE ~ "ALL"
@@ -355,6 +396,7 @@ h1b_df <- h1b_df %>%
 
 cat("H-1B match levels:\n")
 cat("  6-digit SOC:", sum(h1b_df$match_level == "6-digit"), "\n")
+cat("  5-digit SOC:", sum(h1b_df$match_level == "5-digit"), "\n")
 cat("  3-digit SOC:", sum(h1b_df$match_level == "3-digit"), "\n")
 cat("  2-digit SOC:", sum(h1b_df$match_level == "2-digit"), "\n")
 cat("  Pooled:     ", sum(h1b_df$match_level == "pooled"), "\n\n")
@@ -414,7 +456,7 @@ fit_and_predict <- function(native_subset, h1b_subset) {
 
 # --- Fit helper: run one spec across all occupation levels ---
 run_spec <- function(h1b_data, natives_data, fit_fn, spec_name,
-                     occ6, occ3, occ2) {
+                     occ6, occ5, occ3, occ2) {
   cat(sprintf("=== %s ===\n", spec_name))
 
   pred_col <- rep(NA_real_, nrow(h1b_data))
@@ -431,6 +473,15 @@ run_spec <- function(h1b_data, natives_data, fit_fn, spec_name,
       cat(sprintf("    [%d/%d] occupations fitted\r", i, length(occ6)))
   }
   cat("\n")
+
+  # 5-digit level
+  cat(sprintf("  Fitting %d 5-digit occupation models...\n", length(occ5)))
+  for (occ in occ5) {
+    idx <- which(h1b_data$OCC5 == occ & h1b_data$match_level == "5-digit")
+    if (length(idx) == 0) next
+    native_sub <- natives_data %>% filter(OCC5 == occ)
+    pred_col[idx] <- fit_fn(native_sub, h1b_data[idx, ])
+  }
 
   # 3-digit level
   cat(sprintf("  Fitting %d 3-digit occupation models...\n", length(occ3)))
@@ -482,13 +533,14 @@ run_spec <- function(h1b_data, natives_data, fit_fn, spec_name,
 
 # Get unique occupation groups to fit
 occ_groups_6 <- unique(h1b_df$OCCSOC[h1b_df$match_level == "6-digit"])
+occ_groups_5 <- unique(h1b_df$OCC5[h1b_df$match_level == "5-digit"])
 occ_groups_3 <- unique(h1b_df$OCC3[h1b_df$match_level == "3-digit"])
 occ_groups_2 <- unique(h1b_df$OCC2[h1b_df$match_level == "2-digit"])
 
 # --- Spec 1: Experience + Education (no PUMA FE) ---
 spec1 <- run_spec(h1b_df, natives_df, fit_and_predict_nopuma,
                   "Spec 1: Experience + Education (national)",
-                  occ_groups_6, occ_groups_3, occ_groups_2)
+                  occ_groups_6, occ_groups_5, occ_groups_3, occ_groups_2)
 
 h1b_df$predicted_ln_wage_1 <- spec1$predicted_ln_wage
 h1b_df$predicted_wage_1    <- spec1$predicted_wage
@@ -498,7 +550,7 @@ h1b_df$log_gap_1           <- spec1$log_gap
 # --- Spec 2: Experience + Education + PUMA FE ---
 spec2 <- run_spec(h1b_df, natives_df, fit_and_predict,
                   "Spec 2: Experience + Education + PUMA FE",
-                  occ_groups_6, occ_groups_3, occ_groups_2)
+                  occ_groups_6, occ_groups_5, occ_groups_3, occ_groups_2)
 
 h1b_df$predicted_ln_wage_2 <- spec2$predicted_ln_wage
 h1b_df$predicted_wage_2    <- spec2$predicted_wage
@@ -679,7 +731,7 @@ match_summary <- h1b_df %>%
     Median_Gap = median(gap_2),
     .groups = "drop"
   ) %>%
-  arrange(factor(match_level, levels = c("6-digit", "3-digit", "2-digit", "pooled")))
+  arrange(factor(match_level, levels = c("6-digit", "5-digit", "3-digit", "2-digit", "pooled")))
 
 cat("\nSpec 2 (with PUMA FE) by match level:\n")
 for (i in 1:nrow(match_summary)) {
@@ -709,7 +761,7 @@ cat("\nSaved: output/tables/mincer_summary.csv\n")
 
 cat("\n--- Exporting Individual Wage Gaps ---\n")
 
-export_cols <- c("YEAR", "AGE", "OCCSOC", "OCC2", "OCC3", "EDUCD_int",
+export_cols <- c("YEAR", "AGE", "OCCSOC", "OCC5", "OCC3", "OCC2", "EDUCD_int",
                  "S", "X", "INCWAGE", "h1b_dependent", "wage_level",
                  "match_level", "match_occ",
                  "predicted_wage_1", "gap_1", "log_gap_1",
@@ -902,16 +954,16 @@ h1b_nprm <- h1b_nprm %>%
       wage_level == "IV"  ~ p67,
       TRUE ~ NA_real_
     ),
-    # Scenario 2: flat floor at 34th percentile of occupation
-    floor_s2 = p34,
-    # Scenario 3: flat floor at 50th percentile of occupation (occ median)
-    floor_s3 = p50,
-    # Scenario 4: NPRM proposed level-specific (I→35th, II→53rd, III→72nd, IV→90th)
+    # # Scenario 2: flat floor at 34th percentile of occupation (commented out)
+    # floor_s2 = p34,
+    # Scenario 2: flat floor at 50th percentile of occupation (occ median)
+    floor_s2 = p50,
+    # Scenario 4: NPRM proposed level-specific (user-configurable, see top of script)
     floor_s4 = case_when(
-      wage_level == "I"   ~ p35,
-      wage_level == "II"  ~ p53,
-      wage_level == "III" ~ p72,
-      wage_level == "IV"  ~ p90,
+      wage_level == "I"   ~ .data[[paste0("p", nprm_L1)]],
+      wage_level == "II"  ~ .data[[paste0("p", nprm_L2)]],
+      wage_level == "III" ~ .data[[paste0("p", nprm_L3)]],
+      wage_level == "IV"  ~ .data[[paste0("p", nprm_L4)]],
       TRUE ~ NA_real_
     )
   )
@@ -969,11 +1021,12 @@ cat(sprintf("%-45s  %7s / %7s  Scrn: %5.1f%%  NoGeo: %5.1f%%  PUMA: %5.1f%%\n",
             0.0, baseline_underpaid_1 * 100, baseline_underpaid_2 * 100))
 
 s1 <- run_scenario(h1b_nprm, "floor_s1", "S1: Status quo (17/34/50/67th)")
-s2 <- run_scenario(h1b_nprm, "floor_s2", "S2: Floor at 34th pctile")
-s3 <- run_scenario(h1b_nprm, "floor_s3", "S3: Floor at 50th pctile (occ median)")
-s4 <- run_scenario(h1b_nprm, "floor_s4", "S4: NPRM proposed (35/53/72/90th)")
+# s2_34 <- run_scenario(h1b_nprm, "floor_s2", "S2: Floor at 34th pctile")  # commented out
+s2 <- run_scenario(h1b_nprm, "floor_s2", "S2: Floor at 50th pctile (occ median)")
+s3_label <- sprintf("S3: NPRM proposed (%d/%d/%d/%dth)", nprm_L1, nprm_L2, nprm_L3, nprm_L4)
+s3 <- run_scenario(h1b_nprm, "floor_s4", s3_label)
 
-nprm_results <- bind_rows(baseline_row, s1, s2, s3, s4)
+nprm_results <- bind_rows(baseline_row, s1, s2, s3)
 
 # --- Save NPRM table ---
 nprm_out <- nprm_results %>%
@@ -991,9 +1044,8 @@ cat("\nSaved: output/tables/nprm_wage_floor_analysis.csv\n")
 # --- Figure 6: NPRM scenario comparison (both specs) ---
 scenario_labels <- c("Baseline\n(no floor)",
                       "S1: Status quo\n(17/34/50/67)",
-                      "S2: 34th pctile",
-                      "S3: 50th pctile\n(occ median)",
-                      "S4: NPRM proposed\n(35/53/72/90)")
+                      "S2: 50th pctile\n(occ median)",
+                      sprintf("S3: NPRM proposed\n(%d/%d/%d/%d)", nprm_L1, nprm_L2, nprm_L3, nprm_L4))
 
 p6_data <- nprm_results %>%
   mutate(Scenario_short = factor(scenario_labels, levels = scenario_labels)) %>%
