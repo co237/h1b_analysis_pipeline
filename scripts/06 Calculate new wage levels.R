@@ -146,8 +146,6 @@ for (i in seq_along(occs)) {
   use_pooled <- nrow(occ_data) < 100
   
   if (!use_pooled) {
-    # Per-occupation model uses highest_ed categories, no MET2013 FE
-    # (metro variation is handled by the OES median anchor, not the Mincer)
     m <- tryCatch(
       feols(
         log_incwage ~
@@ -155,7 +153,7 @@ for (i in seq_along(occs)) {
           I(Years_pot_experience^2) +
           I(Years_pot_experience^3) +
           I(Years_pot_experience^4) +
-          highest_ed,
+          highest_ed | MET2013,
         data    = occ_data,
         weights = ~PERWT
       ),
