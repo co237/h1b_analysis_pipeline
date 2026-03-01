@@ -17,8 +17,9 @@ if (!file.exists("config.R")) {
   cat("ERROR: Cannot find config.R in current directory\n")
   cat("Current directory:", getwd(), "\n\n")
   cat("Please set your working directory to the project root:\n")
-  cat("  setwd('/Users/connorobrien/Documents/GitHub/h1b_analysis_pipeline')\n\n")
-  cat("Or in RStudio: Session > Set Working Directory > To Project Directory\n\n")
+  cat("  Option 1: Open dol-nprm-analysis.Rproj in RStudio (recommended)\n")
+  cat("  Option 2: In RStudio: Session > Set Working Directory > To Project Directory\n")
+  cat("  Option 3: Use setwd('path/to/dol-nprm-analysis')\n\n")
   stop("Wrong working directory")
 }
 

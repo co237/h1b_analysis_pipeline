@@ -121,7 +121,9 @@ source("scripts/simple/step1_process_lca.R")
 ### Issue: "Cannot find config.R"
 **Fix:** Make sure you're running from the project root directory
 ```r
-setwd("/Users/connorobrien/Documents/GitHub/h1b_analysis_pipeline")
+# Option 1: Open dol-nprm-analysis.Rproj in RStudio (recommended)
+# Option 2: Set working directory manually
+setwd("path/to/dol-nprm-analysis")
 ```
 
 ### Issue: "File not found: FOIA Data/..."

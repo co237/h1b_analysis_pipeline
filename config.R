@@ -8,38 +8,36 @@
 # --- Project Paths ---
 # Get the directory where this config file is located
 # This should be the project root
-project_root <- tryCatch({
-  # First, try to use the location of this config.R file
-  if (exists("ofile") && !is.null(ofile)) {
-    # When sourced, sys.frame(1)$ofile contains the path
-    dirname(normalizePath(ofile))
-  } else if (requireNamespace("rstudioapi", quietly = TRUE) &&
-             rstudioapi::isAvailable()) {
-    # Try rstudioapi if available
-    active_doc <- tryCatch(rstudioapi::getActiveDocumentContext()$path, error = function(e) "")
-    if (active_doc != "" && file.exists(active_doc)) {
-      dirname(active_doc)
-    } else {
-      getwd()
-    }
-  } else {
-    # Fallback to current working directory
-    getwd()
-  }
-}, error = function(e) {
-  # Last resort: use working directory
-  getwd()
-})
 
-# Ensure project_root is not empty
+# Find the actual location of this config.R file
+config_file_path <- sys.frame(1)$ofile
+
+if (!is.null(config_file_path) && file.exists(config_file_path)) {
+  # config.R was sourced - use its directory
+  project_root <- dirname(normalizePath(config_file_path))
+} else {
+  # Fallback: assume we're in project root if config.R exists here
+  if (file.exists("config.R")) {
+    project_root <- getwd()
+  } else if (file.exists("../config.R")) {
+    # We're in a subdirectory (like scripts/)
+    project_root <- dirname(getwd())
+  } else {
+    # Last resort
+    project_root <- getwd()
+  }
+}
+
+# Ensure project_root is not empty and is valid
 if (is.null(project_root) || project_root == "" || !dir.exists(project_root)) {
   project_root <- getwd()
 }
 
 # Final validation: if we still have an invalid path, stop with helpful message
 if (is.null(project_root) || project_root == "" || !dir.exists(project_root)) {
-  stop("Cannot determine project root directory. Please set working directory:\n",
-       "  setwd('/Users/connorobrien/Documents/GitHub/h1b_analysis_pipeline')")
+  stop("Cannot determine project root directory. Please:\n",
+       "  1. Open the .Rproj file in RStudio, OR\n",
+       "  2. Set working directory: setwd('path/to/dol-nprm-analysis')")
 }
 
 # Main data directories
@@ -73,7 +71,9 @@ lca_data_path <- file.path(data_raw, "LCA_Data")
 
 # ACS (American Community Survey) IPUMS microdata
 # Update this to match your actual IPUMS extract filename
-acs_ddi_file <- file.path(data_raw, "usa_00068.xml")
+# Note: Script 06 uses usa_00076.xml (5-year pooled 2019-2023)
+# Other scripts use usa_00068.xml (2021-2023)
+acs_ddi_file <- file.path(data_raw, "usa_00076.xml")
 
 # SOC code definitions
 soc_definitions_file <- file.path(data_raw, "soc_2018_definitions.xlsx")

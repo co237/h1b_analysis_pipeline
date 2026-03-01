@@ -18,12 +18,15 @@
 library(dplyr)
 library(ipumsr)
 library(Hmisc)
-
-# Step 1: Load the cleaned data and filter out 2021
+########################################################################################
+# STEP 1: Load the cleaned data and filter out 2021
+########################################################################################
 h1b_22_24 <- read.csv("data/processed/h1b_fy21_24_with_pumas.csv") %>%
   filter(registration_lottery_year != 2021)
 
-# Step 2: Linearly interpolate percentiles between 17 and 67 using OFLC Wage Levels
+########################################################################################
+# STEP 2: Linearly interpolate percentiles between 17 and 67 using OFLC Wage Levels
+########################################################################################
 h1b_22_24 <- h1b_22_24 %>%
   mutate(
     # Determine full-time vs part-time
@@ -99,15 +102,16 @@ h1b_22_24 <- h1b_22_24 %>%
   ungroup() %>%
   # Clean up helper columns
   select(-is_fulltime, -L1, -L2, -L3, -L4, -P1, -P2, -P3, -P4, -wage)
-
-# Step 3: Construct national 67th/90th (national) occupation percentiles using ACS data. 
+########################################################################################
+# STEP 3: Construct national 67th/90th (national) occupation percentiles using ACS data. 
+########################################################################################
 # Note that these ratios are derived from 2019-2023 five-year ACS data. 
 
-ddi <- read_ipums_ddi("data/raw/usa_00074.xml")
+ddi <- read_ipums_ddi("data/raw/usa_00076.xml")
 data <- read_ipums_micro(ddi)
 
 occupational_percentiles <- data %>%
-  filter(INCWAGE > 0 & INCWAGE != 999999 & INCWAGE != 999998) %>%
+  filter(INCWAGE > 0 & INCWAGE != 999999 & INCWAGE != 999998, EMPSTAT == 1, AGE >15) %>%
   group_by(OCCSOC) %>%
   dplyr::summarize(
     p67 = as.numeric(Hmisc::wtd.quantile(INCWAGE, weights = PERWT, probs = 0.67, na.rm = TRUE)),
@@ -117,7 +121,9 @@ occupational_percentiles <- data %>%
   mutate(ratio_67_90 = p90 / p67,
          OCCSOC = paste0(substr(OCCSOC, 1, 2), "-", substr(OCCSOC, 3, nchar(OCCSOC))))
 
-# Step 4: Tag H-1B petitions with ACS codes
+########################################################################################
+# STEP 4: Tag H-1B petitions with ACS codes
+########################################################################################
 
 # Create crosswalk and tag every H-1B petition with its best ACS code.
 acs_oflc_crosswalk <- read.csv("data/raw/occupation_oflc_to_acs_crowsswalk.csv")
@@ -177,20 +183,9 @@ h1b_22_24 <- h1b_22_24 %>%
   ) %>%
   ungroup() %>%
   select(-is_fulltime, -ptile90_adj, -L4, -wage)
-  
-# Marge in native benchmarks for wage premium comparison 
-
-premia_by_applicant <- read.csv("output/tables/h1b_with_native_comparisons_fy2022_2024.csv")
-
-h1b_22_24 <- h1b_22_24 %>%
-  left_join(premia_by_applicant, by = c("applicant_id" = "applicant_id")) %>%
-  select(-prior_visa, -wage_level, -h1b_dependent, -employer_name, -puma_code,
-         -employment_year, -registration_lottery_year.y, -X, -Soc_last1, -Soc_last2,
-         -Soc_last3, -Match_Level, -Matched, Match_Level_Description, -Title, -Description,
-         -h1b_wage)
-
-
-# Output CSV with percentiles and native wage comparisons. 
+########################################################################################
+# STEP 5: Output CSV with estimated percentiles.
+########################################################################################
 write.csv(h1b_22_24, "h1b_with_percentiles_and_native_comps.csv")
 
 

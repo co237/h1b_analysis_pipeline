@@ -23,6 +23,15 @@
 #   combined at query time rather than pre-computed as a full grid.
 # =============================================================================
 
+# Load configuration
+if (file.exists("config.R")) {
+  source("config.R")
+} else if (file.exists("../config.R")) {
+  source("../config.R")
+} else {
+  stop("Cannot find config.R. Please make sure your working directory is set to the project root")
+}
+
 library(dplyr)
 library(ipumsr)   # For reading IPUMS ACS extracts
 library(fixest)   # For fast fixed effects estimation
@@ -30,25 +39,24 @@ library(Hmisc)    # For wtd.quantile()
 library(purrr)    # For map() in per-occupation loop
 library(readr)    # For write_csv / read_csv
 
-setwd("~/Downloads")
-
 # =============================================================================
 # SECTION 1: LOAD AND CLEAN ACS DATA
 # =============================================================================
 
 # Load IPUMS ACS extract (5-year pooled 2019-2023)
-ddi <- read_ipums_ddi("usa_00075.xml")
+# Note: Update config.R if your ACS file has a different name
+ddi <- read_ipums_ddi(acs_ddi_file)
 acs_data_19_23 <- read_ipums_micro(ddi)
 
-# Clean and restrict to full-time, full-year workers with valid wages.
-# This ensures the Mincer reflects the kind of workers prevailing wages apply to.
+# Clean and restrict to native-born employed workers 16+ with valid wages. 
 acs_data_19_23 <- acs_data_19_23 %>%
   filter(
     EMPSTAT ==1,
     INCWAGE != 999999,    # Remove top-coded wages
     INCWAGE != 999998,    # Remove missing wages
     INCWAGE > 0,          # Remove zero wages
-    AGE > 15,             # Remove children
+    AGE > 15,    # Remove children
+    CITIZEN %in% c(0,1), # Restrict to native-born 
     !is.na(EDUCD)         # Remove missing education
   ) %>%
   mutate(
@@ -87,7 +95,8 @@ acs_data_19_23 <- acs_data_19_23 %>%
     # Log wage is the dependent variable in the Mincer equation
     log_incwage = log(INCWAGE),
     highest_ed = case_when(EDUCD < 62 ~ "Less than HS",
-                               EDUCD > 62 & EDUCD < 81~ "High school",
+                               EDUCD > 62 & EDUCD < 65~ "High school",
+                               EDUCD > 64 & EDUCD < 81 ~ "Some college"
                                EDUCD == 81 ~ "Associates",
                                EDUCD == 101 ~ "Bachelors",
                                EDUCD == 114 ~ "Masters",
@@ -143,7 +152,7 @@ for (i in seq_along(occs)) {
   ratio_p75 <- p75 / raw_median
   ratio_p90 <- p90 / raw_median
   
-  use_pooled <- nrow(occ_data) < 100
+  use_pooled <- nrow(occ_data) < 100 
   
   if (!use_pooled) {
     m <- tryCatch(
@@ -200,6 +209,7 @@ occ_model_df <- bind_rows(lapply(occ_models, function(x) {
     b_exp4               = x$coefs["I(I(Years_pot_experience^4))"],
     b_ed_Bachelors       = x$coefs["highest_edBachelors"],
     b_ed_HighSchool      = x$coefs["highest_edHigh school"],
+    b_ed_SomeCollege      = x$coefs["highest_edSome college"],
     b_ed_LessThanHS      = x$coefs["highest_edLess than HS"],
     b_ed_Masters         = x$coefs["highest_edMasters"],
     b_ed_PhD             = x$coefs["highest_edPhD"],
@@ -208,7 +218,7 @@ occ_model_df <- bind_rows(lapply(occ_models, function(x) {
   )
 }))
 
-write_csv(occ_model_df, "occ_model_coefficients.csv")
+write_csv(occ_model_df, file.path(output_tables, "occ_model_coefficients.csv"))
 
 rm(acs_data_19_23, occ_models, mincer_pooled)
 gc()
@@ -237,6 +247,7 @@ predict_wage <- function(coef_row, highest_ed, years_exp, oflc_level3) {
   # Column names in coef_row follow the pattern b_ed_CATEGORY.
   ed_coef <- case_when(
     highest_ed == "Bachelors"    ~ coef_row$b_ed_Bachelors,
+    highest_ed == "Some college"    ~ coef_row$b_ed_SomeCollege,
     highest_ed == "High school"  ~ coef_row$b_ed_HighSchool,
     highest_ed == "Less than HS" ~ coef_row$b_ed_LessThanHS,
     highest_ed == "Masters"      ~ coef_row$b_ed_Masters,
@@ -275,10 +286,10 @@ predict_wage <- function(coef_row, highest_ed, years_exp, oflc_level3) {
 # SECTION 4: LOAD OFLC DATA AND CROSSWALK
 # =============================================================================
 
-acs_oflc_crosswalk <- read.csv("occupation_oflc_to_acs_crowsswalk.csv")
+acs_oflc_crosswalk <- read.csv(file.path(data_raw, "occupation_oflc_to_acs_crowsswalk.csv"))
 
 # --- 4a. ALC (standard prevailing wages) ---
-oflc_levels_alc <- read.csv("OFLC_Wages_2025-26_Updated 2/ALC_Export.csv") %>%
+oflc_levels_alc <- read.csv(file.path(oflc_data_path, "ALC_Export.csv")) %>%
   mutate(Level3 = ifelse(Level3 > 350, Level3, Level3 * 2080),
          Level3 = ifelse(Label == "High Wage", 239200, Level3)) %>%
   select(Area, SocCode, GeoLvl, Level3)
@@ -288,7 +299,7 @@ oflc_base_alc <- left_join(oflc_levels_alc, acs_oflc_crosswalk, by = "SocCode") 
   select(Area, SocCode, GeoLvl, Level3, ACS_OCCSOC)
 
 # --- 4b. EDC (ACWIA prevailing wages) ---
-oflc_levels_edc <- read.csv("OFLC_Wages_2025-26_Updated 2/EDC_Export.csv") %>%
+oflc_levels_edc <- read.csv(file.path(oflc_data_path, "EDC_Export.csv")) %>%
   mutate(Level3 = ifelse(Level3 > 350, Level3, Level3 * 2080),
          Level3 = ifelse(Label == "High Wage", 239200, Level3)) %>%
   select(Area, SocCode, GeoLvl, Level3)
@@ -301,7 +312,7 @@ oflc_base_edc <- left_join(oflc_levels_edc, acs_oflc_crosswalk, by = "SocCode") 
 # SECTION 5: COMPUTE PREVAILING WAGES
 # =============================================================================
 
-edu_grid <- c("Less than HS", "High school", "Associates",
+edu_grid <- c("Less than HS", "High school", "Some college", "Associates",
               "Bachelors", "Masters", "Prof degree", "PhD")
 exp_grid <- seq(0, 45, by = 1)
 
@@ -363,38 +374,13 @@ run_prevailing_wage_loop <- function(oflc_base, output_file) {
 }
 
 # Run for both datasets
-run_prevailing_wage_loop(oflc_base_alc, "prevailing_wages_alc.csv")
-run_prevailing_wage_loop(oflc_base_edc, "prevailing_wages_edc.csv")
+run_prevailing_wage_loop(oflc_base_alc, file.path(output_tables, "prevailing_wages_alc.csv"))
+run_prevailing_wage_loop(oflc_base_edc, file.path(output_tables, "prevailing_wages_edc.csv"))
 
-cat("Done. Output written to", output_file, "\n")
-
-# =============================================================================
-# SECTION 6: VALIDATION
-# =============================================================================
-
-# Read final output and run basic sanity checks
-# prevailing_wages <- read_csv(output_file)
-# 
-# # Check monotonicity: wage levels should always increase p50 -> p62 -> p75 -> p90
-# monotonicity_check <- prevailing_wages %>%
-#   summarise(
-#     any_p62_below_p50 = any(wage_p62 < wage_p50, na.rm = TRUE),
-#     any_p75_below_p62 = any(wage_p75 < wage_p62, na.rm = TRUE),
-#     any_p90_below_p75 = any(wage_p90 < wage_p75, na.rm = TRUE)
-#   )
-# print(monotonicity_check)
-# # All should be FALSE — monotonicity is guaranteed by construction since
-# # the percentile scalars are fixed positive constants > 1.
-# 
-# # Check coverage: how many area-occupation combinations have wage estimates?
-# cat("Total rows:", nrow(prevailing_wages), "\n")
-# cat("Unique area-occupation combinations:",
-#     n_distinct(prevailing_wages %>% select(Area, SocCode)), "\n")
-# cat("Education-experience cells per combo:",
-#     length(edu_grid) * length(exp_grid), "\n")
+cat("Done. Output written to output/tables/\n")
 
 # =============================================================================
-# SECTION 7: SPOT CHECK — LOOK UP A SPECIFIC WORKER PROFILE
+# SECTION 6: SPOT CHECK — LOOK UP A SPECIFIC WORKER PROFILE
 # =============================================================================
 # Given a specific occupation, area, education category, and years of
 # potential experience, return the four prevailing wage levels.
@@ -409,7 +395,7 @@ cat("Done. Output written to", output_file, "\n")
 # Load from disk if not already in memory
 # oflc_base_alc <- ... (built in Section 4)
 # oflc_base_edc <- ... (built in Section 4)
-# occ_model_df  <- read_csv("occ_model_coefficients.csv")
+# occ_model_df  <- read_csv(file.path(output_tables, "occ_model_coefficients.csv"))
 
 lookup_prevailing_wage <- function(soc_code, area, highest_ed, years_exp,
                                    wage_type = "ALC") {

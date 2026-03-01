@@ -4,13 +4,10 @@
 # Source: https://github.com/BloombergGraphics/2024-h1b-immigration-data
 # Universe: all H-1B lottery winners who filed petitions
 #
-# *** MODIFIED VERSION: Preserves 2010 SOC codes alongside 2018 crosswalked codes ***
-# This version adds SOC_CODE_2010 and SOC_TITLE_2010 columns to preserve the
-# original vintage SOC codes from the LCA data before the 2018 crosswalk is applied.
-#
-# Author: Jiaxin He (jiaxin@eig.org) and Sarah Eckhardt (sarah@eig.org)
-# Date last edited: 10.20.2025
-# Modified: 2026-01-16 to preserve 2010 SOC codes
+# Author: Institute for Progress
+# Date last edited: February 28, 2026
+# Data cleaning originally based on work from the Economic Innovation work, which
+# can be found here: https://github.com/EIG-Research/h1b-npv-wage-ranking-simulations 
 
 # Steps:
   # clean and combine 2015-2024 LCA entries
@@ -19,34 +16,29 @@
   # merge in LCA data to obtain SOC codes, LCA application addresses, and OES wage levels
   # clean wage data
   # identify potential duplicates
-  # implement new wage level ranking rule as follows
-  #   (1) merge with HUD zip code to county crosswalk
-  #   (2) for those with missing zip codes, invalid zip codes, or low overlapping area zip codes, geocode using arcgis
-  #   (3) link the geocoded addresses to counties by spatial geometry
-  #   (4) merge the zip-based and geocoded counties and crosswalk counties to CBSA
-  #   (5) merge CBSA to MSAs, manually correct for New England townships
-  #   (6) crosswalk 2010 SOC occupation codes used by old LCA entries to 2018 SOCs
-  #   (7) first pass on those without SOC occupations via string similarity on DOT codes and free string job titles
-  #   (8) second pass on those without SOC occupations via machine learning on company names, degree fields, job titles, and DOT codes of entries with SOC codes
-  #   (9) entries that still have no SOC matches cannot be merged with OFLC wage levels; use LCA wage levels for these and filter out those without LCA wage levels
+  #   merge with HUD zip code to county crosswalk
+  #   for those with missing zip codes, invalid zip codes, or low overlapping area zip codes, geocode using arcgis
+  #   link the geocoded addresses to counties by spatial geometry
+  #   merge the zip-based and geocoded counties and crosswalk counties to CBSA
+  #   merge CBSA to MSAs, manually correct for New England townships
+  #   crosswalk 2010 SOC occupation codes used by old LCA entries to 2018 SOCs
+  #   first pass on those without SOC occupations via string similarity on DOT codes and free string job titles
+  #   second pass on those without SOC occupations via machine learning on company names, degree fields, job titles, and DOT codes of entries with SOC codes
+  #   entries that still have no SOC matches cannot be merged with OFLC wage levels; use LCA wage levels for these and filter out those without LCA wage levels
 
-  #   (12) wherever the wage is lower than OFLC Level I lower bound, re-label as wage level I
-  #   (13) wherever the LCA wage levels cannot be determined, fall back to LCA wage levels
-  # remove extraneous variables and export cleaned data by year
+
 
 ################################################################################
 ################################################################################
-
-rm(list = ls())
 
 # Load configuration
-# Check if we're in the scripts directory or project root
-if (file.exists("../config.R")) {
-  source("../config.R")  # Running from scripts/
-} else if (file.exists("config.R")) {
-  source("config.R")      # Running from project root
+if (file.exists("config.R")) {
+  source("config.R")
+} else if (file.exists("../config.R")) {
+  source("../config.R")
 } else {
-  stop("Cannot find config.R. Please run from project root or scripts/ directory")
+  stop("Cannot find config.R. Please make sure your working directory is set to the project root:\n",
+       "  setwd('/Users/connorobrien/Documents/GitHub/dol-nprm-analysis')")
 }
 
 # load libraries
@@ -69,6 +61,8 @@ lca_path = lca_data_path
 cleaned_path = data_intermediate
 dot_matching_path = file.path(data_intermediate, "dot_matching")
 
+################################################################################
+# STEP 1: Clean and combine 2015-2024 LCA data
 ################################################################################
 # read in LCA data
 # pulling data back to 2015 for conservative purposes -- sometimes takes years between LCA and I-129 submission.
@@ -289,7 +283,8 @@ save(lca_2015_2024, file = file.path(cleaned_path, "lca_2015_2024.RData"))
 load(file.path(cleaned_path, "lca_2015_2024.RData"))
 
 ################################################################################
-# pull in 2021-2024 H1-B FOIA data and clean names
+# STEP 2: Pull in 2021-2024 H1-B FOIA data and clean names
+################################################################################
 setwd(foia_path)
 
 fys <- bind_rows(
@@ -374,7 +369,9 @@ fys <- fys %>%
 remove(lca_2015_2024)
 
 ################################################################################
-# adjust wage data
+# STEP 3: Adjust Wage Data
+################################################################################
+# Description: 
 # if pay is obviously hourly and not identified as such, convert to annual based on full/part time status
 # assume full time is 40 hrs a week * 52 weeks a year, part time 20 hrs a week * 52 weeks a year
 
@@ -479,7 +476,8 @@ fys <- fys %>%
   bind_rows(picked)
 
 ################################################################################
-# Additional variable cleaning: addresses, SOC titles.
+# STEP 4: Additional variable cleaning: addresses, SOC titles.
+################################################################################
       clean_addr_full <- function(street, city, state, zip) {
         street2 <- street %>%
           str_squish() %>%
@@ -1200,7 +1198,8 @@ fys <- fys %>% left_join(fys_misform_SOC, by = "applicant_id") %>%
 
 
 ################################################################################
-# Merge in OFLC metro-occupation wages wherever possible
+# STEP 5: Merge in OFLC metro-occupation Wage Levels
+################################################################################
 setwd(data_path)
 wage_levels_FY24 <- read.csv("Other Data/OFLC_Wages_2024-25/ALC_Export_FY2023.csv") %>%
   mutate(
@@ -1264,7 +1263,7 @@ wage_levels_FY21<- read.csv("Other Data/OFLC_Wages_2024-25/ALC_Export_FY2020.csv
     Year = 2021
   )
 
-
+# Combine Wage levels into FY2020-FY2023 (2021-2024) dataframe
 oflc_2021_2024 <- rbind(wage_levels_FY24, wage_levels_FY23, wage_levels_FY22, wage_levels_FY21)
 
 primary <- fys %>%
@@ -1295,7 +1294,10 @@ fallback %>% filter(is.na(Level1)) %>%
 # 3) Recombine
 final <- bind_rows(matched, fallback)
 
-#####
+################################################################################
+# STEP 6: Identify proffered Wage Levels (highest PW Level that proffered wage exceeds)
+# Note that this is the Wage Level that's used for the DHS weighted lottery
+################################################################################
 final_final <- final %>%
   mutate(WAGE_LEVEL_OFLC = case_when(
     (petition_beneficiary_full_time == "Y" | petition_beneficiary_full_time == "")  & petition_annual_pay_clean+1  >= Level1_full & petition_annual_pay_clean+1  < Level2_full ~ "I",
@@ -1332,7 +1334,7 @@ final_final <- final %>%
 
 
 ################################################################################
-# Save final cleaned dataset
+# STEP 7: Save final cleaned dataset
 ################################################################################
 
 cat("\n=== Saving cleaned H-1B data ===\n")

@@ -12,6 +12,11 @@ data/*.zip
 data/h1b_analysis_pipeline_data/
 data/output/
 
+# Large CSV files in root directory
+h1b_with_percentiles_and_native_comps.csv
+*.csv
+!example*.csv
+
 # Keep README files that explain where to get data
 !data/raw/README.md
 !data/intermediate/README.md
@@ -20,8 +25,7 @@ data/output/
 # R files
 .Rhistory
 .RData
-.Rproj.user
-*.Rproj
+.Rproj.user/
 Rplots.pdf
 
 # Output files (can be regenerated or stored in Google Drive)

@@ -1,6 +1,6 @@
-# H-1B Wage Premium Analysis Pipeline
+# DOL NPRM H-1B Wage Analysis
 
-A comprehensive R-based pipeline for analyzing wage premiums of H-1B visa holders compared to native-born workers, with multiple control configurations including geographic (PUMA) controls.
+A comprehensive R-based pipeline for analyzing wage premiums of H-1B visa holders compared to native-born workers, with multiple control configurations including geographic (PUMA) controls. This analysis supports the Department of Labor's Notice of Proposed Rulemaking (NPRM) on H-1B wage requirements.
 
 ## Recent Updates (February 2026)
 
@@ -26,14 +26,47 @@ This project integrates three main components:
 2. **Geocoding**: Maps H-1B worksite addresses to Public Use Microdata Areas (PUMAs)
 3. **Wage Premium Analysis**: Compares H-1B wages to native-born worker wages with various control configurations
 
+## Quick Start
+
+**New to this project? Follow these steps:**
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/yourusername/dol-nprm-analysis.git
+   cd dol-nprm-analysis
+   ```
+
+2. **Open in RStudio**
+   - Double-click `dol-nprm-analysis.Rproj` to open the project in RStudio
+
+3. **Run the setup script**
+   ```r
+   source('setup.R')
+   ```
+   This will check for required packages, create directories, and verify data files.
+
+4. **Get the data files**
+   - **Easy way:** Request access to Google Drive folder (contact connor@ifp.org)
+   - **DIY way:** Follow instructions in `DATA_SOURCES.md` (~8-10 GB total)
+
+5. **Run the analysis**
+   ```r
+   source('run_pipeline_simple.R')
+   ```
+
+For more detailed instructions, see the sections below.
+
 ## Repository Structure
 
 ```
-h1b_analysis_pipeline/
+dol-nprm-analysis/
 ├── README.md                      # This file
+├── DATA_SOURCES.md                # Detailed guide for downloading all required data
 ├── DATA_GOOGLE_DRIVE.md           # Guide for organizing large files
+├── setup.R                        # First-time setup script (RUN THIS FIRST!)
 ├── config.R                       # Central configuration file
 ├── run_pipeline_simple.R          # Main pipeline orchestration (RECOMMENDED)
+├── dol-nprm-analysis.Rproj        # RStudio project file
 ├── .gitignore                     # Git ignore rules
 │
 ├── scripts/                       # Analysis scripts (run in order)
@@ -235,11 +268,26 @@ install.packages("matrixStats")
 ### 3. Clone or Download Repository
 
 ```bash
-git clone https://github.com/yourusername/h1b_analysis_pipeline.git
-cd h1b_analysis_pipeline
+git clone https://github.com/yourusername/dol-nprm-analysis.git
+cd dol-nprm-analysis
 ```
 
-### 4. Get Data Files from Google Drive
+### 4. Run Setup Script (First Time Only)
+
+Open the project in RStudio by double-clicking `dol-nprm-analysis.Rproj`, then run:
+
+```r
+source('setup.R')
+```
+
+This will:
+- Check your R version
+- Install any missing required packages
+- Create the necessary directory structure
+- Check for required data files
+- Guide you on what data files are missing
+
+### 5. Get Data Files from Google Drive
 
 **Option 1: Request access to shared Google Drive folder**
 - Contact connor@ifp.org for access to `h1b_analysis_pipeline_data`
@@ -247,15 +295,31 @@ cd h1b_analysis_pipeline
 - See `DATA_GOOGLE_DRIVE.md` for detailed setup instructions
 
 **Option 2: Gather data files yourself**
-- Follow the data requirements list above
-- Download from original sources
-- Place in `data/raw/` directory
+- See **DATA_SOURCES.md** for comprehensive download instructions
+- Each data source includes direct links and step-by-step instructions
+- Total download size: ~8-10 GB
 
-### 5. Configure Paths
+### 6. Verify Setup
 
-Edit `config.R` to set paths appropriate for your system. By default, paths are relative to the project directory.
+After obtaining data files, run the setup script again to verify:
+
+```r
+source('setup.R')
+```
+
+It will confirm all required files are present before you run the analysis.
 
 ## Usage
+
+### First-Time Setup
+
+Before running the pipeline for the first time, run the setup script:
+
+```r
+source('setup.R')
+```
+
+This will verify your environment is ready and guide you through any missing requirements.
 
 ### Running the Complete Pipeline (RECOMMENDED)
 
@@ -396,7 +460,8 @@ These should be placed in `data/intermediate/dot_matching/`. Contact the origina
 
 If you use this pipeline in your research, please cite:
 ```
-O'Brien, C. (2026). H-1B Wage Premium Analysis Pipeline. GitHub repository.
+O'Brien, C. (2026). DOL NPRM H-1B Wage Analysis Pipeline.
+GitHub repository: https://github.com/yourusername/dol-nprm-analysis
 ```
 
 ## License
@@ -407,7 +472,8 @@ O'Brien, C. (2026). H-1B Wage Premium Analysis Pipeline. GitHub repository.
 
 For questions or issues:
 - Open an issue on GitHub
-- Contact: [your email]
+- Email: connor@ifp.org
+- For data access: See DATA_SOURCES.md or contact connor@ifp.org
 
 ## Changelog
 
