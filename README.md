@@ -4,14 +4,12 @@
 
 ## Overview
 
-This project analyzes a forthcoming Department of Labor (DOL) rule that would reform how prevailing wages are set for H-1B and other employment-based visa programs. Under the current system, prevailing wages are based on employer job descriptions, which allows employers to understate position seniority and pay workers less. The proposed reform would instead tie prevailing wages to workers' actual qualifications (education and experience).
+This project analyzes proposed Department of Labor (DOL) reforms to the H-1B prevailing wage system. The pipeline reconstructs the universe of H-1B petitions filed in FY 2022-2024, estimates worker-specific prevailing wages using Mincer earnings models calibrated to American Community Survey (ACS) microdata, and provides tools for simulating different policy scenarios.
 
-This analysis:
-1. Reconstructs the universe of H-1B petitions filed in FY 2022-2024
-2. Estimates worker-specific prevailing wages using a Mincer earnings model calibrated to American Community Survey (ACS) microdata
-3. Simulates the effect of proposed wage threshold increases on petition underpayment rates
-
-**Key Finding**: The analysis quantifies what share of H-1B petitions would still be underpaid (relative to comparable U.S. workers) under various proposed threshold scenarios.
+Users can:
+1. Estimate alternative prevailing wages based on worker qualifications (education and experience) using Mincer earnings equations
+2. Set custom percentile thresholds for wage levels (e.g., Level I = 45th percentile, Level II = 62nd percentile)
+3. Simulate how different threshold combinations would affect petition underpayment rates
 
 ## Project Structure
 
@@ -147,17 +145,26 @@ source("scripts/02_geocode_to_pumas.R")
 - Occupation crosswalk
 
 **Process:**
-- Estimates Mincer earnings equations (log wage ~ education + experience + experience² + ...) separately for each occupation
-- Anchors wage level using OFLC Level 3 (occupation-area median)
-- Creates lookup function: `predict_wage(soc_code, area, education, experience, year)` → 4 wage levels (p50, p62, p75, p90)
+- Estimates Mincer earnings equations for each occupation separately using native-born ACS workers
+- **Functional form**: `log(wage) ~ exp + exp² + exp³ + exp⁴ + categorical_education`
+  - Education is categorical (8 levels: Less than HS, High school, Some college, Associates [reference], Bachelors, Masters, Professional degree, PhD)
+  - Experience enters as a quartic polynomial to capture nonlinear wage-experience profiles
+  - Associates degree is the omitted reference category
+- **Hierarchical fallback structure**: When sample size < 100 observations, falls back through:
+  1. 6-digit SOC code (occupation-specific)
+  2. 5-digit SOC group
+  3. 3-digit SOC group
+  4. 2-digit SOC group
+  5. Fully pooled national model (all occupations)
+- **Geographic hierarchy**: Area-specific models where data permits; otherwise national-level model
+- Anchors wage level using OFLC Level 3 (occupation-area median from OES)
+- Creates lookup function: `lookup_prevailing_wage(soc_code, area, education, experience, year)` → 4 wage levels (p50, p62, p75, p90)
 
 **Output:**
-- Model objects stored in memory: `occ_area_models`, `oflc_bases`, `predict_wage()`
+- Model objects stored in memory: `occ_area_models`, `oflc_bases`, `lookup_prevailing_wage()`
 - Coefficient table: `output/tables/occ_model_coefficients.csv`
 
 **Runtime:** ~30-45 minutes (Mincer estimation is CPU-intensive)
-
-**Key Insight:** This alternative system ties wages to worker qualifications, not job descriptions.
 
 ---
 
@@ -220,18 +227,36 @@ source("scripts/02_geocode_to_pumas.R")
 
 ## Methodology Notes
 
-### Why Mincer Equations?
+### Mincer Earnings Equations
 
-The Mincer earnings equation is a standard labor economics model:
+The Mincer earnings equation is a standard labor economics model relating wages to worker characteristics. The functional form used in this analysis is:
 
 ```
-log(wage) = β₀ + β₁·education + β₂·experience + β₃·experience² + ... + ε
+log(wage) = α + β₁·exp + β₂·exp² + β₃·exp³ + β₄·exp⁴ + Σγₖ·educₖ + ε
 ```
 
-This model estimates how wages vary with education and experience *within* an occupation. By anchoring the wage level to OFLC's OES-based median and using Mincer to adjust for worker qualifications, we create a wage system that:
-- Reflects actual labor market outcomes (ACS microdata)
-- Varies by occupation and geography (OFLC median anchors)
-- Rewards workers' human capital (education/experience adjustments)
+Where:
+- Education enters as **categorical dummy variables** (8 levels: Less than HS, High school, Some college, Associates [reference], Bachelors, Masters, Professional degree, PhD)
+- Experience enters as a **quartic polynomial** (exp, exp², exp³, exp⁴) to capture the nonlinear, "hump-shaped" wage-experience profile
+- Associates degree is the omitted reference category
+
+Models are estimated separately for each occupation using native-born ACS workers (2019-2023 pooled). The coefficients capture the returns to education and experience *within* each occupation. These coefficients are then used to adjust OFLC's OES-based wage anchors for individual worker qualifications.
+
+### Hierarchical Fallback Structure
+
+**Occupation hierarchy**: When sample size is insufficient (< 100 observations) at the 6-digit SOC level, the model falls back through progressively broader occupation groups:
+1. 6-digit SOC code (e.g., 15-1252: Software Developers)
+2. 5-digit SOC group (e.g., 15-125: Software and Web Developers)
+3. 3-digit SOC group (e.g., 151: Computer Occupations)
+4. 2-digit SOC group (e.g., 15: Computer and Mathematical)
+5. Fully pooled national model (all occupations)
+
+**Geographic hierarchy**:
+- Area-specific models are estimated where data permits (occupation-metro combinations with n ≥ 100)
+- When no area-specific model exists, the national occupation-wide model is used
+- OFLC wage anchors follow a similar hierarchy: MSA-level OES wages are used when available; otherwise national-level OES wages (GeoLvl = "N") are used
+
+This hierarchical approach balances granularity (occupation-specific and area-specific models where possible) with statistical reliability (broader models when sample sizes are too small).
 
 ### Two Wage Schedules
 
