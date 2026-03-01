@@ -87,13 +87,14 @@ source("scripts/02_geocode_to_pumas.R")
 - FOIA H-1B petition files (FY 2021-2024)
 - LCA disclosure files (2015-2024)
 - OFLC prevailing wage tables
-- Geographic and occupation crosswalks
+- Geographic crosswalks (ZIP-to-County, County-to-MSA, ZIP-to-CBSA)
+- Occupation crosswalks (SOC 2010-to-2018, DOT-to-SOC)
 
 **Process:**
 - Merges FOIA petitions with LCA applications to obtain SOC codes and wage levels
-- Geocodes worksites to MSAs
-- Crosswalks SOC 2010 codes to SOC 2018
-- Matches occupation codes using string similarity and machine learning
+- Geocodes worksites to MSAs using ZIP code crosswalks
+- Standardizes occupation codes to SOC 2018 using the 2010-to-2018 crosswalk
+- For petitions missing SOC codes, uses DOT-to-SOC crosswalk combined with string matching and machine learning to assign codes
 
 **Output:**
 - `data/intermediate/h1b_fy21_24_cleaned.csv` (~335 MB, 370K petitions)
@@ -124,10 +125,12 @@ source("scripts/02_geocode_to_pumas.R")
 **Input:**
 - H-1B data with PUMAs from Step 2
 - ACS microdata (2021-2023)
+- OFLC-to-ACS occupation crosswalk
 
 **Process:**
+- Tags each H-1B petition with its corresponding ACS occupation code using the OFLC-to-ACS crosswalk
 - Uses OFLC wage levels (17th, 34th, 50th, 67th percentiles) to linearly interpolate each petition's percentile rank within its occupation
-- Constructs synthetic 90th percentile using ACS for petitions above Level IV
+- Constructs synthetic 90th percentile using ACS wage distributions for petitions above Level IV (67th percentile)
 - Calculates native worker wage benchmarks for comparison
 
 **Output:**
@@ -142,9 +145,10 @@ source("scripts/02_geocode_to_pumas.R")
 **Input:**
 - ACS microdata (2019-2023, 5-year pooled)
 - OFLC prevailing wage tables (FY 2021-2025)
-- Occupation crosswalk
+- OFLC-to-ACS occupation crosswalk
 
 **Process:**
+- Uses OFLC-to-ACS crosswalk to link OFLC SOC codes (from wage tables) to ACS OCCSOC codes (for Mincer estimation)
 - Estimates Mincer earnings equations for each occupation separately using native-born ACS workers
 - **Functional form**: `log(wage) ~ exp + exp² + exp³ + exp⁴ + categorical_education`
   - Education is categorical (8 levels: Less than HS, High school, Some college, Associates [reference], Bachelors, Masters, Professional degree, PhD)
@@ -244,6 +248,8 @@ Models are estimated separately for each occupation using native-born ACS worker
 
 ### Hierarchical Fallback Structure
 
+The pipeline uses a hierarchical approach to balance granularity with statistical reliability, falling back to broader samples when data is insufficient.
+
 **Occupation hierarchy**: When sample size is insufficient (< 100 observations) at the 6-digit SOC level, the model falls back through progressively broader occupation groups:
 1. 6-digit SOC code (e.g., 15-1252: Software Developers)
 2. 5-digit SOC group (e.g., 15-125: Software and Web Developers)
@@ -251,12 +257,83 @@ Models are estimated separately for each occupation using native-born ACS worker
 4. 2-digit SOC group (e.g., 15: Computer and Mathematical)
 5. Fully pooled national model (all occupations)
 
-**Geographic hierarchy**:
-- Area-specific models are estimated where data permits (occupation-metro combinations with n ≥ 100)
-- When no area-specific model exists, the national occupation-wide model is used
-- OFLC wage anchors follow a similar hierarchy: MSA-level OES wages are used when available; otherwise national-level OES wages (GeoLvl = "N") are used
+**Geographic area treatment**:
 
-This hierarchical approach balances granularity (occupation-specific and area-specific models where possible) with statistical reliability (broader models when sample sizes are too small).
+*Area-specific models (most granular)*:
+- When an occupation-metro combination has n ≥ 100 ACS observations, a separate Mincer model is estimated using **only workers in that specific metro area**
+- The data is **filtered** to that single metro (MET2013 == area_code) before estimation
+- Geographic variation is controlled through sample restriction, not fixed effects
+- Example: A model for Software Developers in San Francisco uses only San Francisco software developers
+
+*National occupation models (fallback)*:
+- When an occupation-metro combination has insufficient data (n < 100), the pipeline uses the occupation-wide model estimated across **all metros**
+- No metro fixed effects are included in these broader models
+- Example: If there aren't enough accountants in Boise, the national accountants model is used instead
+
+**Two-stage geographic fallback**:
+
+The Mincer coefficients and OES wage anchors fall back independently:
+
+1. **Mincer coefficients** (education/experience adjustments):
+   - Try area-specific model (occupation × metro) first
+   - Fall back to national occupation model if area-specific unavailable
+
+2. **OES wage anchor** (base wage level):
+   - Try MSA-level OFLC Level 3 wage first
+   - Fall back to national-level wage (GeoLvl = "N") if MSA-level unavailable
+
+This means a petition might use:
+- National Mincer coefficients × MSA wage anchor (most common fallback)
+- Area-specific coefficients × national wage anchor (rare)
+- Either × either, depending on data availability
+
+**Practical example**: A junior software developer in Boise, Idaho might use:
+- **Mincer coefficients**: Area-specific model for Software Developers in Boise (if n ≥ 100 in ACS)
+- **Wage anchor**: National OES wage for Software Developers (if Boise doesn't have enough OES respondents)
+- The education/experience adjustments reflect Boise's labor market, but the base wage level uses the national median
+
+### Occupation Code Crosswalks
+
+The pipeline integrates multiple data sources that use different occupation coding systems. Three major crosswalks reconcile these differences:
+
+#### 1. OFLC-to-ACS Occupation Crosswalk (`occupation_oflc_to_acs_crowsswalk.csv`)
+
+**Purpose**: Maps OFLC SOC codes (used in prevailing wage tables) to ACS OCCSOC codes (used in IPUMS microdata)
+
+**Structure**:
+- `SocCode`: OFLC SOC code with hyphen (e.g., "15-1252")
+- `ACS_OCCSOC`: Corresponding ACS occupation code (e.g., "15-1252" or "15-12XX" for aggregated)
+- `Soc_last1`, `Soc_last2`, `Soc_last3`: Fallback codes at progressively broader aggregation levels
+- `Match_Level`: Quality indicator (1 = exact match, 2 = aggregated to broader category)
+- `Match_Level_Description`: Human-readable match explanation (e.g., "Exact (SocCode)" or "Aggregated Level 1")
+
+**How it's used**:
+- Step 3 uses this crosswalk to tag H-1B petitions with ACS occupation codes for wage percentile interpolation
+- Step 4 uses it to link OFLC prevailing wage anchors to the ACS-based Mincer models
+- When OFLC uses granular codes not present in ACS, the crosswalk aggregates to the nearest ACS category
+- Example: Multiple detailed OFLC education administrator codes (11-9031, 11-9032, 11-9033) all map to ACS code "11-9030" (education administrators, aggregated)
+
+#### 2. SOC 2010 to SOC 2018 Crosswalk (`soc_2010_to_2018_crosswalk.xlsx`)
+
+**Purpose**: Older LCA applications (pre-2024) use SOC 2010 codes; OFLC wage tables use SOC 2018. This crosswalk harmonizes them.
+
+**Used in**: Step 1 (data cleaning) to standardize all occupation codes to SOC 2018 before merging with wage data.
+
+#### 3. DOT to SOC Crosswalk (`DOT_to_ONET_SOC.xlsx`)
+
+**Purpose**: Very old petitions may reference Dictionary of Occupational Titles (DOT) codes instead of SOC codes. This crosswalk maps DOT occupation categories to modern SOC codes.
+
+**Used in**: Step 1 (data cleaning) in combination with string matching and machine learning to assign SOC codes to petitions missing them.
+
+#### Geographic Crosswalks
+
+Several geographic crosswalks are used in data cleaning and geocoding:
+- **ZIP-to-County** (HUD USPS Crosswalk): Maps ZIP codes to county FIPS codes
+- **County-to-MSA** (BLS area definitions): Maps counties to metropolitan statistical areas
+- **ZIP-to-CBSA**: Direct ZIP to core-based statistical area mapping
+- **ZCTA-to-PUMA** (Census Bureau): Maps ZIP Code Tabulation Areas to Public Use Microdata Areas for ACS data linkage
+
+These are used in Steps 1-2 for worksite geocoding but don't affect wage estimation methodology.
 
 ### Two Wage Schedules
 
