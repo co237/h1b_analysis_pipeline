@@ -3,31 +3,41 @@
 # =============================================================================
 #
 # PREREQUISITES:
-#   mincer_prevailing_wages.R must have been run in the same session so that
-#   the following objects are available in memory:
+#   Script 04 must have been run in the same session so that the following
+#   objects are available in memory:
 #     - occ_area_models  — list of fitted Mincer models by occupation and area
 #     - oflc_bases       — nested list of OFLC wage tables by type and year
 #     - predict_wage()   — wage prediction function
 #
 # INPUT:
-#   h1b_with_percentiles_and_native_comps.csv — cleaned H-1B petition file
+#   data/processed/h1b_with_percentiles_and_native_comps.csv
 #
 # OUTPUT:
-#   h1b_with_mincer_wages.csv — same file with four prevailing wage columns added
+#   data/processed/h1b_with_mincer_wages.csv
 #
 # =============================================================================
 
-# Confirm prerequisites are available
+# Load configuration
+if (file.exists("config.R")) {
+  source("config.R")
+} else if (file.exists("../config.R")) {
+  source("../config.R")
+} else {
+  stop("Cannot find config.R. Set your working directory to the project root.")
+}
+
+# Auto-run Script 04 if prerequisites are not available
 if (!exists("occ_area_models") || !exists("oflc_bases") || !exists("predict_wage")) {
-  stop("Please run mincer_prevailing_wages.R first to populate ",
-       "occ_area_models, oflc_bases, and predict_wage() in your session.")
+  cat("Model objects not found in memory. Running Script 04 first...\n\n")
+  source(file.path("scripts", "04 Calculate new prevailing wages.R"), local = FALSE)
+  cat("\nScript 04 complete. Continuing with Script 05...\n\n")
 }
 
 # =============================================================================
 # STEP 0: LOAD AND PREPARE H-1B DATA
 # =============================================================================
 
-h1b_22_24 <- read.csv("h1b_with_percentiles_and_native_comps.csv")
+h1b_22_24 <- read.csv(file.path(data_processed, "h1b_with_percentiles_and_native_comps.csv"))
 
 h1b_22_24 %>%
   group_by(petition_beneficiary_edu_code) %>%
@@ -312,8 +322,9 @@ h1b_22_24 %>%
 # STEP 5: SAVE OUTPUT
 # =============================================================================
 
-write.csv(h1b_22_24, "h1b_with_mincer_wages.csv", row.names = FALSE)
-cat("Saved to h1b_with_mincer_wages.csv\n")
+output_file <- file.path(data_processed, "h1b_with_mincer_wages.csv")
+write.csv(h1b_22_24, output_file, row.names = FALSE)
+cat("\nSaved to:", output_file, "\n")
 
 
 nrow(h1b_22_24 %>% filter(petition_annual_pay_clean >pw_p50))

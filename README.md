@@ -134,7 +134,7 @@ source("scripts/02_geocode_to_pumas.R")
 - Calculates native worker wage benchmarks for comparison
 
 **Output:**
-- `h1b_with_percentiles_and_native_comps.csv` (~360 MB)
+- `data/processed/h1b_with_percentiles_and_native_comps.csv` (~360 MB)
 
 **Runtime:** ~15-20 minutes
 
@@ -184,11 +184,11 @@ source("scripts/02_geocode_to_pumas.R")
 - Tags each petition with four Mincer-based prevailing wages
 
 **Output:**
-- `h1b_with_mincer_wages.csv` (~370 MB, adds 4 wage columns)
+- `data/processed/h1b_with_mincer_wages.csv` (~370 MB, adds 4 wage columns)
 
 **Runtime:** ~10-15 minutes
 
-**Note:** Steps 4 and 5 must run in the same R session (Mincer models are held in memory).
+**Note:** Steps 4 and 5 must run in the same R session (Mincer models are held in memory). Script 05 will automatically run Script 04 if needed.
 
 ---
 

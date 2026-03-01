@@ -31,20 +31,37 @@
 #           that are still underpaid relative to their Mincer-based wage — i.e.
 #           paid below pw_p50, the occupation-area-education-experience median.
 #
-# INPUTS (must be available in the R session):
-#   h1b_22_24 — the H-1B petition dataset output by tag_h1b_prevailing_wages.R,
-#               with the following columns:
-#     petition_annual_pay_clean    — annualized wage paid to the beneficiary
-#     PW_WAGE_LEVEL                — DOL-assigned prevailing wage level (I–IV)
-#     petition_percentile_combined — beneficiary's estimated wage percentile
-#                                    within their occupation (from 03_wage_premium_analysis.R)
-#     pw_p50                       — Mincer-based occupational median wage for
-#                                    this worker's SOC, area, education, and
-#                                    experience (from tag_h1b_prevailing_wages.R)
+# INPUT:
+#   data/processed/h1b_with_mincer_wages.csv (or h1b_22_24 object in memory from Script 05)
 #
 # =============================================================================
 
+# Load configuration
+if (file.exists("config.R")) {
+  source("config.R")
+} else if (file.exists("../config.R")) {
+  source("../config.R")
+} else {
+  stop("Cannot find config.R. Set your working directory to the project root.")
+}
+
 library(dplyr)
+
+# Load or create h1b_22_24 dataset
+if (!exists("h1b_22_24") || !"pw_p50" %in% names(h1b_22_24)) {
+  cat("Loading H-1B data with Mincer wages...\n")
+  input_file <- file.path(data_processed, "h1b_with_mincer_wages.csv")
+
+  if (!file.exists(input_file)) {
+    cat("Data file not found. Running Scripts 04 and 05 first...\n\n")
+    source(file.path("scripts", "04 Calculate new prevailing wages.R"), local = FALSE)
+    source(file.path("scripts", "05 Apply new PWs to H1B petitions.R"), local = FALSE)
+    cat("\nScripts 04-05 complete. Continuing with Script 06...\n\n")
+  } else {
+    h1b_22_24 <- read.csv(input_file)
+    cat("Loaded:", input_file, "\n\n")
+  }
+}
 
 # =============================================================================
 # USER-CONFIGURABLE PARAMETERS

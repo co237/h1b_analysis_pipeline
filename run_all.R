@@ -115,10 +115,10 @@ tryCatch({
   step3_time <- difftime(Sys.time(), step3_start, units = "mins")
   cat(sprintf("\n✓ Step 3 completed in %.1f minutes\n", step3_time))
 
-  if (!file.exists("h1b_with_percentiles_and_native_comps.csv")) {
-    warning("Expected output file not found: h1b_with_percentiles_and_native_comps.csv")
+  if (!file.exists("data/processed/h1b_with_percentiles_and_native_comps.csv")) {
+    warning("Expected output file not found: data/processed/h1b_with_percentiles_and_native_comps.csv")
   } else {
-    file_size <- file.info("h1b_with_percentiles_and_native_comps.csv")$size / 1024^2
+    file_size <- file.info("data/processed/h1b_with_percentiles_and_native_comps.csv")$size / 1024^2
     cat(sprintf("Output file created: %.1f MB\n", file_size))
   }
 
@@ -180,10 +180,10 @@ tryCatch({
   step5_time <- difftime(Sys.time(), step5_start, units = "mins")
   cat(sprintf("\n✓ Step 5 completed in %.1f minutes\n", step5_time))
 
-  if (!file.exists("h1b_with_mincer_wages.csv")) {
-    warning("Expected output file not found: h1b_with_mincer_wages.csv")
+  if (!file.exists("data/processed/h1b_with_mincer_wages.csv")) {
+    warning("Expected output file not found: data/processed/h1b_with_mincer_wages.csv")
   } else {
-    file_size <- file.info("h1b_with_mincer_wages.csv")$size / 1024^2
+    file_size <- file.info("data/processed/h1b_with_mincer_wages.csv")$size / 1024^2
     cat(sprintf("Output file created: %.1f MB\n", file_size))
   }
 
@@ -239,9 +239,9 @@ cat(sprintf("Total execution time: %.1f minutes (%.2f hours)\n\n",
 cat("Intermediate outputs created:\n")
 cat("  1. data/intermediate/h1b_fy21_24_cleaned.csv\n")
 cat("  2. data/processed/h1b_fy21_24_with_pumas.csv\n")
-cat("  3. h1b_with_percentiles_and_native_comps.csv\n")
+cat("  3. data/processed/h1b_with_percentiles_and_native_comps.csv\n")
 cat("  4. output/tables/occ_model_coefficients.csv\n")
-cat("  5. h1b_with_mincer_wages.csv\n")
+cat("  5. data/processed/h1b_with_mincer_wages.csv\n")
 cat("  6. [Simulation results in console output]\n\n")
 
 cat("To re-run Step 6 with different policy scenarios:\n")

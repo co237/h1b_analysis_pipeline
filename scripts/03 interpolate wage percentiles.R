@@ -1,18 +1,31 @@
-# Calculate underpayment rates for NPRM cutoffs.
-
-# For each petition, we have the 17th, 34th, 50th, and 67th percentile (the four OFLC levels). 
+# =============================================================================
+# Interpolate Wage Percentiles
+# =============================================================================
+#
+# For each petition, we have the 17th, 34th, 50th, and 67th percentile (the four OFLC levels).
 # If the petition is between the 17th and 67th percentile for pay within an occupation,
 # we can calculate the petitioner's specific percentile by linearly interpolating between
 # its two nearest-non-missing levels using OFLC levels. Note that we cannot calculate above the 67th percentile
-# using OFLC Wage Levels. 
-
+# using OFLC Wage Levels.
+#
 # For those above Level 4 (the 67th percentile), we can use the ACS to construct a synthetic 90th percentile.
 # To do that, we find the ratio of the 90th percentile earnings to the 67th to the closest-matching occupation.
 # Then, we multiply that ratio by the Level 4 threshold to get a synthetic 90th percentile. We then use this synthetic
-# 90th percentile to interpolate anyone between the 67th and 90th percentile. 
-
+# 90th percentile to interpolate anyone between the 67th and 90th percentile.
+#
 # Note: BLS should be able to do this for you using OES directly, but publicly-available OES
-# data does not match publicly-available OFLC data. We therefore use ACS as a stopgap. 
+# data does not match publicly-available OFLC data. We therefore use ACS as a stopgap.
+#
+# =============================================================================
+
+# Load configuration
+if (file.exists("config.R")) {
+  source("config.R")
+} else if (file.exists("../config.R")) {
+  source("../config.R")
+} else {
+  stop("Cannot find config.R. Set your working directory to the project root.")
+}
 
 # Packages
 library(dplyr)
@@ -21,7 +34,7 @@ library(Hmisc)
 ########################################################################################
 # STEP 1: Load the cleaned data and filter out 2021
 ########################################################################################
-h1b_22_24 <- read.csv("data/processed/h1b_fy21_24_with_pumas.csv") %>%
+h1b_22_24 <- read.csv(file.path(data_processed, "h1b_fy21_24_with_pumas.csv")) %>%
   filter(registration_lottery_year != 2021)
 
 ########################################################################################
@@ -126,7 +139,7 @@ occupational_percentiles <- data %>%
 ########################################################################################
 
 # Create crosswalk and tag every H-1B petition with its best ACS code.
-acs_oflc_crosswalk <- read.csv("data/raw/occupation_oflc_to_acs_crowsswalk.csv")
+acs_oflc_crosswalk <- read.csv(file.path(data_raw, "occupation_oflc_to_acs_crowsswalk.csv"))
 
 # Add in synthetic 90th percentile
 h1b_22_24 <- h1b_22_24 %>% left_join(acs_oflc_crosswalk,
@@ -186,6 +199,8 @@ h1b_22_24 <- h1b_22_24 %>%
 ########################################################################################
 # STEP 5: Output CSV with estimated percentiles.
 ########################################################################################
-write.csv(h1b_22_24, "h1b_with_percentiles_and_native_comps.csv")
+output_file <- file.path(data_processed, "h1b_with_percentiles_and_native_comps.csv")
+write.csv(h1b_22_24, output_file, row.names = FALSE)
+cat("\nSaved to:", output_file, "\n")
 
 
