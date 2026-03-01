@@ -340,13 +340,6 @@ These are used in Steps 1-2 for worksite geocoding but don't affect wage estimat
 - **ALC (Standard)**: Used for most H-1B and PERM cases
 - **EDC (ACWIA)**: Higher standard for H-1B dependent employers under the American Competitiveness and Workforce Improvement Act
 
-### Year Matching
-
-H-1B fiscal years (FY) correspond to employment years one year earlier:
-- FY 2022 H-1Bs → employed in 2021 → compared to ACS 2021
-- FY 2023 H-1Bs → employed in 2022 → compared to ACS 2022
-- FY 2024 H-1Bs → employed in 2023 → compared to ACS 2023
-
 ## System Requirements
 
 - **R**: 4.0.0 or higher
