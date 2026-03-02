@@ -79,10 +79,10 @@ if (!exists("h1b_22_24") || !"pw_p50" %in% names(h1b_22_24)) {
 #
 # PROPOSED SYSTEM (User-set percentiles):
 
-pw_level_I_threshold   <- 45
-pw_level_II_threshold  <- 62
-pw_level_III_threshold <- 78
-pw_level_IV_threshold  <- 90
+pw_level_I_threshold   <- 34
+pw_level_II_threshold  <- 52
+pw_level_III_threshold <- 70
+pw_level_IV_threshold  <- 88
 
 # =============================================================================
 # STEP 1: ASSIGN APPLICABLE THRESHOLD TO EACH PETITION

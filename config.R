@@ -16,16 +16,25 @@ if (!is.null(config_file_path) && file.exists(config_file_path)) {
   # config.R was sourced - use its directory
   project_root <- dirname(normalizePath(config_file_path))
 } else {
-  # Fallback: assume we're in project root if config.R exists here
-  if (file.exists("config.R")) {
-    project_root <- getwd()
-  } else if (file.exists("../config.R")) {
+  # Fallback: search upwards for config.R
+  current_dir <- getwd()
+  if (file.exists(file.path(current_dir, "config.R"))) {
+    project_root <- current_dir
+  } else if (file.exists(file.path(dirname(current_dir), "config.R"))) {
     # We're in a subdirectory (like scripts/)
-    project_root <- dirname(getwd())
+    project_root <- dirname(current_dir)
+  } else if (file.exists(file.path(dirname(dirname(current_dir)), "config.R"))) {
+    # We're two levels down
+    project_root <- dirname(dirname(current_dir))
   } else {
     # Last resort
-    project_root <- getwd()
+    project_root <- current_dir
   }
+}
+
+# CRITICAL FIX: If project_root ends with "/scripts", move up one level
+if (basename(project_root) == "scripts") {
+  project_root <- dirname(project_root)
 }
 
 # Ensure project_root is not empty and is valid

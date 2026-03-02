@@ -73,6 +73,7 @@ library(ipumsr)   # For reading IPUMS ACS microdata extracts
 library(fixest)   # For fast weighted OLS
 library(Hmisc)    # For wtd.quantile() — weighted quantile computation
 library(readr)    # For read_csv
+library(readxl)   # For reading SOC crosswalk Excel file
 
 # Load configuration file which sets file paths.
 # config.R should define:
@@ -232,16 +233,36 @@ acs_oflc_crosswalk <- read.csv(
   file.path(data_raw, "occupation_oflc_to_acs_crowsswalk.csv")
 )
 
+# Load FY2021-2022 crosswalk for SOC 2010 codes
+acs_oflc_crosswalk_2010 <- read.csv(
+  file.path(data_raw, "fy2021_oflc_to_acs_crosswalk.csv")
+) %>%
+  select(SocCode = OFLC_SOC_2010,
+         ACS_OCCSOC = ACS_2018_OCCSOC) %>%
+  filter(!is.na(ACS_OCCSOC))
+
+cat("Loaded crosswalks:\n")
+cat("  - SOC 2018 crosswalk (FY2023+):", nrow(acs_oflc_crosswalk), "codes\n")
+cat("  - SOC 2010 crosswalk (FY2021-2022):", nrow(acs_oflc_crosswalk_2010), "codes\n\n")
+
 # Helper: load and clean one OFLC export file.
 # filename — just the CSV filename (not the full path)
-load_oflc <- function(filename) {
+# use_2010_crosswalk — if TRUE, use FY2021 three-stage crosswalk (SOC 2010 → ACS 2018)
+load_oflc <- function(filename, use_2010_crosswalk = FALSE) {
+  # Select appropriate crosswalk
+  crosswalk <- if (use_2010_crosswalk) {
+    acs_oflc_crosswalk_2010
+  } else {
+    acs_oflc_crosswalk
+  }
+
   read.csv(file.path(oflc_data_path, filename)) %>%
     mutate(
       # Convert Average to hourly for the high-wage threshold check.
       # If Average > 350 it is already annual — divide by 2080 to get hourly.
       # If Average <= 350 it is already hourly — use as-is.
       Average_hourly = ifelse(Average > 350, Average / 2080, Average),
-      
+
       # Flag high-wage rows: all four wage levels are missing AND
       # the average hourly wage is at least $75/hr. The Average check
       # distinguishes genuine high-wage occupations from data gaps where
@@ -251,30 +272,32 @@ load_oflc <- function(filename) {
         (is.na(Level3) | Level3 == 0) &
         (is.na(Level4) | Level4 == 0) &
         !is.na(Average_hourly) & Average_hourly >= 75,
-      
+
       # Annualize Level3 if hourly, then top-code high-wage rows
       Level3 = ifelse(Level3 > 350, Level3, Level3 * 2080),
       Level3 = ifelse(is_high_wage, 239200, Level3)
     ) %>%
-    left_join(acs_oflc_crosswalk, by = "SocCode") %>%
+    left_join(crosswalk, by = "SocCode") %>%
     mutate(ACS_OCCSOC = gsub("-", "", ACS_OCCSOC)) %>%
     select(Area, SocCode, GeoLvl, Level3, ACS_OCCSOC)
 }
 
 # Load all years and both wage types into a nested list.
 # Access pattern: oflc_bases[["ALC"]][["2021"]], oflc_bases[["EDC"]][["2025"]], etc.
+# FY2021-2022 use SOC 2010 codes (use_2010_crosswalk = TRUE)
+# FY2023+ use SOC 2018 codes (use_2010_crosswalk = FALSE, default)
 oflc_bases <- list(
   ALC = list(
-    "2021" = load_oflc("ALC_Export_FY2021.csv"),
-    "2022" = load_oflc("ALC_Export_FY2022.csv"),
+    "2021" = load_oflc("ALC_Export_FY2021.csv", use_2010_crosswalk = TRUE),
+    "2022" = load_oflc("ALC_Export_FY2022.csv", use_2010_crosswalk = TRUE),
     "2023" = load_oflc("ALC_Export_FY2023.csv"),
-    "2025" = load_oflc("ALC_Export.csv")          # Current year, no year suffix
+    "2025" = load_oflc("ALC_Export.csv")
   ),
   EDC = list(
-    "2021" = load_oflc("EDC_Export_FY2021.csv"),
-    "2022" = load_oflc("EDC_Export_FY2022.csv"),
+    "2021" = load_oflc("EDC_Export_FY2021.csv", use_2010_crosswalk = TRUE),
+    "2022" = load_oflc("EDC_Export_FY2022.csv", use_2010_crosswalk = TRUE),
     "2023" = load_oflc("EDC_Export_FY2023.csv"),
-    "2025" = load_oflc("EDC_Export.csv")           # Current year, no year suffix
+    "2025" = load_oflc("EDC_Export.csv")
   )
 )
 
@@ -735,42 +758,43 @@ lookup_prevailing_wage <- function(soc_code, area, highest_ed, years_exp,
 }
 
 # =============================================================================
-# USAGE EXAMPLES
+# USAGE EXAMPLES (commented out - uncomment to test)
 # =============================================================================
 
-# Standard (ALC) prevailing wage, FY2025 — software developer in San Francisco,
+# Standard (ALC) prevailing wage, FY2023 — software developer in San Francisco,
 # master's degree, 5 years of experience
-lookup_prevailing_wage(
-  soc_code   = "15-1252",
-  area       = "41860",
-  highest_ed = "Masters",
-  years_exp  = 5,
-  wage_type  = "ALC",
-  year       = 2021
-)
+# NOTE: Use SOC 2018 codes for FY2023+, SOC 2010 codes for FY2021-2022
+# lookup_prevailing_wage(
+#   soc_code   = "15-1252",
+#   area       = "41860",
+#   highest_ed = "Masters",
+#   years_exp  = 5,
+#   wage_type  = "ALC",
+#   year       = 2023
+# )
 
-# Same worker, ACWIA (EDC) wages, FY2025
-lookup_prevailing_wage(
-  soc_code   = "15-1252",
-  area       = "41860",
-  highest_ed = "Masters",
-  years_exp  = 5,
-  wage_type  = "EDC",
-  year       = 2023
-)
+# Same worker, ACWIA (EDC) wages, FY2023
+# lookup_prevailing_wage(
+#   soc_code   = "15-1252",
+#   area       = "41860",
+#   highest_ed = "Masters",
+#   years_exp  = 5,
+#   wage_type  = "EDC",
+#   year       = 2023
+# )
 
-# Compare the same worker across all four fiscal years (ALC only)
-do.call(rbind, lapply(c(2021, 2022, 2023, 2025), function(yr) {
-  lookup_prevailing_wage("15-1252", "41860", "Masters", 5,
-                         wage_type = "ALC", year = yr)
-}))
+# Compare the same worker across recent fiscal years (ALC only)
+# do.call(rbind, lapply(c(2023, 2025), function(yr) {
+#   lookup_prevailing_wage("17-2051", "41860", "Bachelors", 15,
+#                          wage_type = "ALC", year = yr)
+# }))
 
 # Compare ALC vs EDC for all years side by side
-do.call(rbind, lapply(c(2021, 2022, 2023, 2025), function(yr) {
-  rbind(
-    lookup_prevailing_wage("13-2011", "41860", "Masters", 5,
-                           wage_type = "ALC", year = yr),
-    lookup_prevailing_wage("13-2011", "41860", "Masters", 5,
-                           wage_type = "EDC", year = yr)
-  )
-}))
+# do.call(rbind, lapply(c(2021, 2022, 2023, 2025), function(yr) {
+#   rbind(
+#     lookup_prevailing_wage("13-2011", "41860", "Masters", 5,
+#                            wage_type = "ALC", year = yr),
+#     lookup_prevailing_wage("13-2011", "41860", "Masters", 5,
+#                            wage_type = "EDC", year = yr)
+#   )
+# }))
