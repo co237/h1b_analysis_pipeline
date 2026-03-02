@@ -57,9 +57,10 @@ if (file.exists("config.R")) {
   stop("Cannot find config.R. Set your working directory to the project root.")
 }
 
-# Auto-run Script 04 if prerequisites are not available
-if (!exists("occ_area_models") || !exists("oflc_bases") || !exists("predict_wage")) {
-  cat("Model objects not found in memory. Running Script 04 first...\n\n")
+# Check if prerequisites are available (either in memory or as files)
+# NEW METHODOLOGY: We need education-experience ratios (not coefficients)
+if (!exists("occ_edu_exp_ratios") && !file.exists(file.path(data_processed, "mincer_edu_exp_ratios.csv"))) {
+  cat("Mincer ratios not found in memory or file. Running Script 04 first...\n\n")
   # Save current working directory
   original_wd <- getwd()
   # Source from project root, not from scripts directory
@@ -74,6 +75,21 @@ if (!exists("occ_area_models") || !exists("oflc_bases") || !exists("predict_wage
   # Restore working directory
   setwd(original_wd)
   cat("\nScript 04 complete. Continuing with Script 05...\n\n")
+}
+
+# Load ratios from file if not in memory
+if (!exists("occ_edu_exp_ratios") || is.null(occ_edu_exp_ratios)) {
+  cat("Loading education-experience ratios from file...\n")
+  occ_edu_exp_ratios <- read.csv(file.path(data_processed, "mincer_edu_exp_ratios.csv"))
+  cat("Loaded ratios for", length(unique(occ_edu_exp_ratios$OCCSOC)), "occupations\n\n")
+}
+
+# Load OFLC bases if not in memory (needed for OFLC Level 3 wages)
+if (!exists("oflc_bases")) {
+  cat("OFLC data not found in memory. Running Script 04 to load it...\n\n")
+  source(ifelse(file.exists("scripts/04 Calculate new prevailing wages.R"),
+                "scripts/04 Calculate new prevailing wages.R",
+                "04 Calculate new prevailing wages.R"), local = FALSE)
 }
 
 # =============================================================================
@@ -297,102 +313,47 @@ unique_combos <- unique_combos %>%
   ) %>%
   select(-Level3, -Level3_national, -SocCode, -SocCode_national)
 
-# --- 2b. Extract Mincer coefficients into a flat data frame and join ---
+# --- 2b. Join education-experience ratios (NEW METHODOLOGY) ---
+#
+# NEW APPROACH:
+#   Instead of joining area-specific coefficients and computing wages from
+#   scratch, we simply join pre-computed ratios indexed by (occupation,
+#   education, experience). These ratios are area-invariant and come from
+#   national Mincer models with area fixed effects.
+#
+#   The area-specific wage information comes entirely from the OFLC Level3
+#   wage (already joined above).
+#
+# ADVANTAGES:
+#   - Simpler code (no coefficient arithmetic)
+#   - Better coverage (one ratio per occupation, not per area)
+#   - More stable estimates (larger sample sizes)
+#   - Place-invariant education/experience premiums
 
-coef_df <- bind_rows(lapply(occ_area_models, function(m) {
-  data.frame(
-    ACS_OCCSOC    = m$OCCSOC,
-    model_area    = as.character(m$Area),  # "NATIONAL" or a metro code string
-    raw_median    = m$raw_median,
-    ratio_p62     = m$ratio_p62,
-    ratio_p75     = m$ratio_p75,
-    ratio_p90     = m$ratio_p90,
-    model_level   = m$model_level,
-    b_intercept   = m$coefs["(Intercept)"],
-    b_exp1        = m$coefs["Years_pot_experience"],
-    b_exp2        = m$coefs["I(I(Years_pot_experience^2))"],
-    b_exp3        = m$coefs["I(I(Years_pot_experience^3))"],
-    b_exp4        = m$coefs["I(I(Years_pot_experience^4))"],
-    b_LessThanHS  = m$coefs["highest_edLess than HS"],
-    b_HighSchool  = m$coefs["highest_edHigh school"],
-    b_SomeCollege = m$coefs["highest_edSome college"],
-    b_Bachelors   = m$coefs["highest_edBachelors"],
-    b_Masters     = m$coefs["highest_edMasters"],
-    b_ProfDegree  = m$coefs["highest_edProf degree"],
-    b_PhD         = m$coefs["highest_edPhD"],
-    stringsAsFactors = FALSE
+# Round experience to nearest integer for matching
+unique_combos <- unique_combos %>%
+  mutate(Years_pot_experience_rounded = round(Years_pot_experience))
+
+# Join ratios by (occupation, education, rounded experience)
+unique_combos <- unique_combos %>%
+  left_join(
+    occ_edu_exp_ratios %>%
+      select(OCCSOC, highest_ed, Years_pot_experience,
+             ratio_p50, ratio_p62, ratio_p75, ratio_p90, model_level),
+    by = c("ACS_OCCSOC" = "OCCSOC",
+           "highest_ed" = "highest_ed",
+           "Years_pot_experience_rounded" = "Years_pot_experience")
   )
-}))
 
-# Area-specific models — keep model_area for joining, drop after
-coef_area <- coef_df %>%
-  filter(model_area != "NATIONAL")
-# NOTE: do NOT select(-model_area) here — it is needed as the join key below
-
-# National fallback models — rename all coefficient columns with _nat suffix
-coef_national_mincer <- coef_df %>%
-  filter(model_area == "NATIONAL") %>%
-  select(-model_area) %>%
-  rename_with(~ paste0(.x, "_nat"), -ACS_OCCSOC)
-
-# Join area-specific first (matched on both ACS_OCCSOC and MSA_code),
-# then national fallback (matched on ACS_OCCSOC only).
-# Where area-specific coefficients exist they take priority; otherwise
-# the ifelse() calls below fill in from the _nat columns.
-unique_combos <- unique_combos %>%
-  left_join(coef_area,
-            by = c("ACS_OCCSOC", "MSA_code" = "model_area")) %>%
-  left_join(coef_national_mincer, by = "ACS_OCCSOC") %>%
-  mutate(
-    raw_median    = ifelse(!is.na(raw_median),    raw_median,    raw_median_nat),
-    ratio_p62     = ifelse(!is.na(ratio_p62),     ratio_p62,     ratio_p62_nat),
-    ratio_p75     = ifelse(!is.na(ratio_p75),     ratio_p75,     ratio_p75_nat),
-    ratio_p90     = ifelse(!is.na(ratio_p90),     ratio_p90,     ratio_p90_nat),
-    model_level   = ifelse(!is.na(model_level),   model_level,
-                           paste0("occupation-wide: ", model_level_nat)),
-    b_intercept   = ifelse(!is.na(b_intercept),   b_intercept,   b_intercept_nat),
-    b_exp1        = ifelse(!is.na(b_exp1),         b_exp1,        b_exp1_nat),
-    b_exp2        = ifelse(!is.na(b_exp2),         b_exp2,        b_exp2_nat),
-    b_exp3        = ifelse(!is.na(b_exp3),         b_exp3,        b_exp3_nat),
-    b_exp4        = ifelse(!is.na(b_exp4),         b_exp4,        b_exp4_nat),
-    b_LessThanHS  = ifelse(!is.na(b_LessThanHS),   b_LessThanHS,  b_LessThanHS_nat),
-    b_HighSchool  = ifelse(!is.na(b_HighSchool),   b_HighSchool,  b_HighSchool_nat),
-    b_SomeCollege = ifelse(!is.na(b_SomeCollege),  b_SomeCollege, b_SomeCollege_nat),
-    b_Bachelors   = ifelse(!is.na(b_Bachelors),    b_Bachelors,   b_Bachelors_nat),
-    b_Masters     = ifelse(!is.na(b_Masters),      b_Masters,     b_Masters_nat),
-    b_ProfDegree  = ifelse(!is.na(b_ProfDegree),   b_ProfDegree,  b_ProfDegree_nat),
-    b_PhD         = ifelse(!is.na(b_PhD),          b_PhD,         b_PhD_nat)
-  ) %>%
-  select(-ends_with("_nat"))
-
-# --- 2c. Vectorized Mincer prediction ---
-# All arithmetic runs on full columns — no loop, no rowwise().
+# --- 2c. Apply ratios to OFLC Level 3 wages ---
+# Much simpler than before - just multiply!
 
 unique_combos <- unique_combos %>%
   mutate(
-    ed_coef = case_when(
-      highest_ed == "Less than HS" ~ b_LessThanHS,
-      highest_ed == "High school"  ~ b_HighSchool,
-      highest_ed == "Some college" ~ b_SomeCollege,
-      highest_ed == "Bachelors"    ~ b_Bachelors,
-      highest_ed == "Masters"      ~ b_Masters,
-      highest_ed == "Prof degree"  ~ b_ProfDegree,
-      highest_ed == "PhD"          ~ b_PhD,
-      TRUE ~ 0   # Associates: reference category, coefficient = 0
-    ),
-    
-    log_wage_hat = b_intercept +
-      b_exp1 * Years_pot_experience +
-      b_exp2 * Years_pot_experience^2 +
-      b_exp3 * Years_pot_experience^3 +
-      b_exp4 * Years_pot_experience^4 +
-      ed_coef,
-    
-    ratio_p50      = exp(log_wage_hat - log(raw_median)),
     pw_p50         = round(Level3_used * ratio_p50),
-    pw_p62         = round(Level3_used * ratio_p50 * ratio_p62),
-    pw_p75         = round(Level3_used * ratio_p50 * ratio_p75),
-    pw_p90         = round(Level3_used * ratio_p50 * ratio_p90),
+    pw_p62         = round(Level3_used * ratio_p62),
+    pw_p75         = round(Level3_used * ratio_p75),
+    pw_p90         = round(Level3_used * ratio_p90),
     pw_oflc_median = Level3_used,
     pw_model_used  = model_level
   ) %>%

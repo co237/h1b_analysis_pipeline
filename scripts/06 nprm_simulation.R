@@ -1,38 +1,28 @@
 # =============================================================================
-# NPRM Prevailing Wage Simulation
+# NPRM Prevailing Wage Simulation (PERCENTILE-BASED)
 # =============================================================================
 #
 # PURPOSE:
-#   This script simulates the effect of a proposed reform to the H-1B
+#   This script simulates the effect of the proposed NPRM reform to the H-1B
 #   prevailing wage system. Under the current system, prevailing wages are
 #   anchored to fixed percentiles of the occupational wage distribution:
 #   Level I = 17th, Level II = 34th, Level III = 50th, Level IV = 67th.
 #
-#   The proposed reform raises these thresholds, requiring employers to pay
-#   higher wages relative to the occupation's wage distribution. This script
-#   calculates the share of H-1B petitions that would still be underpaid
-#   (i.e. paid below the Mincer-based occupational median for their specific
-#   education and experience profile) after the proposed thresholds take effect.
+#   The proposed reform raises these thresholds. This script calculates:
+#   1. The share of H-1B petitions that would fail to meet the new percentile
+#      threshold for their assigned wage level
+#   2. Among those that do meet the new threshold, the share that remain
+#      underpaid relative to the Mincer-based occupational median (pw_p50)
 #
-# LOGIC:
-#   Step 1: The user sets four new percentile thresholds — one per wage level.
-#   Step 2: We filter to petitions that would be "in scope" under the proposed
-#           rules: those whose current pay already meets the new threshold for
-#           their assigned wage level. Petitions below the threshold are already
-#           underpaid relative to the new floor and are excluded from the
-#           "surviving" pool used to calculate underpayment.
-#
-#           RATIONALE FOR FILTERING: The proposed rules change the minimum
-#           prevailing wage, not the observed wages themselves. Petitions below
-#           the new threshold would presumably need to be repriced or would not
-#           be filed; we focus on those that clear the new floor.
-#
-#   Step 3: Among petitions that clear the new threshold, we calculate the share
-#           that are still underpaid relative to their Mincer-based wage — i.e.
-#           paid below pw_p50, the occupation-area-education-experience median.
+# METHODOLOGY:
+#   - Use pre-calculated petition_percentile_combined from Script 05
+#   - Four user-provided percentile cutoffs apply to PW_WAGE_LEVEL I, II, III, IV
+#   - If petition_percentile_combined >= applicable_threshold → petition qualifies
+#   - Among those who qualify, check if petition_annual_pay_clean < pw_p50 → underpaid
+#   - pw_p50 (Mincer median) is THE underpayment cutoff for everyone regardless of PW_WAGE_LEVEL
 #
 # INPUT:
-#   data/processed/h1b_with_mincer_wages.csv (or h1b_22_24 object in memory from Script 05)
+#   data/processed/h1b_with_mincer_wages.csv
 #
 # =============================================================================
 
@@ -47,20 +37,18 @@ if (file.exists("config.R")) {
 
 library(dplyr)
 
-# Load or create h1b_22_24 dataset
+# Load H-1B data with Mincer wages
 if (!exists("h1b_22_24") || !"pw_p50" %in% names(h1b_22_24)) {
   cat("Loading H-1B data with Mincer wages...\n")
   input_file <- file.path(data_processed, "h1b_with_mincer_wages.csv")
 
   if (!file.exists(input_file)) {
-    cat("Data file not found. Running Scripts 04 and 05 first...\n\n")
-    source(file.path("scripts", "04 Calculate new prevailing wages.R"), local = FALSE)
-    source(file.path("scripts", "05 Apply new PWs to H1B petitions.R"), local = FALSE)
-    cat("\nScripts 04-05 complete. Continuing with Script 06...\n\n")
-  } else {
-    h1b_22_24 <- read.csv(input_file)
-    cat("Loaded:", input_file, "\n\n")
+    stop("Data file not found: ", input_file,
+         "\nRun Scripts 04-05 first to generate Mincer wages.")
   }
+
+  h1b_22_24 <- read.csv(input_file)
+  cat("Loaded:", input_file, "\n\n")
 }
 
 # =============================================================================
@@ -68,8 +56,6 @@ if (!exists("h1b_22_24") || !"pw_p50" %in% names(h1b_22_24)) {
 # =============================================================================
 #
 # Set the proposed percentile thresholds for each of the four wage levels.
-# A petition assigned Level I must have a wage at or above the pw_level_I_threshold
-# percentile of its occupation's wage distribution to clear the new floor.
 #
 # CURRENT SYSTEM (for reference):
 #   pw_level_I_threshold   <- 17
@@ -79,121 +65,107 @@ if (!exists("h1b_22_24") || !"pw_p50" %in% names(h1b_22_24)) {
 #
 # PROPOSED SYSTEM (User-set percentiles):
 
-pw_level_I_threshold   <- 34
-pw_level_II_threshold  <- 52
-pw_level_III_threshold <- 70
-pw_level_IV_threshold  <- 88
+pw_level_I_threshold   <- 35
+pw_level_II_threshold  <- 53
+pw_level_III_threshold <- 72
+pw_level_IV_threshold  <- 90
 
 # =============================================================================
-# STEP 1: ASSIGN APPLICABLE THRESHOLD TO EACH PETITION
+# STEP 1: DETERMINE QUALIFICATION UNDER PROPOSED SYSTEM
 # =============================================================================
 #
-# Each petition is assigned a prevailing wage level (I through IV) by DOL
-# based on the employer's description of the job. We map each level to the
-# user-specified percentile threshold above.
-#
-# Petitions with missing PW_WAGE_LEVEL or petition_percentile_combined are
-# excluded from the analysis — they cannot be evaluated against the threshold.
+# Use petition_percentile_combined (calculated in Script 05) to determine
+# whether each petition meets the new percentile threshold for their assigned
+# wage level.
 #
 # =============================================================================
 
 h1b_sim <- h1b_22_24 %>%
+  filter(!is.na(pw_p50)) %>%  # Only use petitions with valid Mincer wages
   mutate(
+    # Assign applicable threshold based on PW_WAGE_LEVEL
     applicable_threshold = case_when(
       PW_WAGE_LEVEL == "I"   ~ pw_level_I_threshold,
       PW_WAGE_LEVEL == "II"  ~ pw_level_II_threshold,
       PW_WAGE_LEVEL == "III" ~ pw_level_III_threshold,
       PW_WAGE_LEVEL == "IV"  ~ pw_level_IV_threshold,
       TRUE ~ NA_real_
-    )
+    ),
+
+    # Does petition qualify under proposed system?
+    # (i.e., does their percentile meet the new threshold for their level?)
+    qualifies = !is.na(applicable_threshold) &
+                !is.na(petition_percentile_combined) &
+                petition_percentile_combined >= applicable_threshold,
+
+    # Is petition underpaid relative to Mincer median?
+    # This applies to everyone, regardless of PW_WAGE_LEVEL
+    underpaid_vs_mincer = !is.na(petition_annual_pay_clean) &
+                          !is.na(pw_p50) &
+                          petition_annual_pay_clean < pw_p50
   )
 
 cat("=============================================================\n")
-cat("NPRM Prevailing Wage Simulation\n")
+cat("NPRM Prevailing Wage Simulation (PERCENTILE-BASED)\n")
 cat("=============================================================\n")
-cat("Proposed thresholds by wage level:\n")
+cat("Proposed percentile thresholds by wage level:\n")
 cat("  Level I:   >= ", pw_level_I_threshold,   "th percentile\n", sep = "")
 cat("  Level II:  >= ", pw_level_II_threshold,  "th percentile\n", sep = "")
 cat("  Level III: >= ", pw_level_III_threshold, "th percentile\n", sep = "")
 cat("  Level IV:  >= ", pw_level_IV_threshold,  "th percentile\n", sep = "")
 cat("-------------------------------------------------------------\n\n")
 
-cat("Total petitions in dataset:", nrow(h1b_sim), "\n")
+cat("Total petitions in dataset:", nrow(h1b_22_24), "\n")
+cat("Petitions with valid Mincer wages (pw_p50):", nrow(h1b_sim), "\n")
 cat("Petitions with valid PW_WAGE_LEVEL:",
-    sum(!is.na(h1b_sim$applicable_threshold)), "\n")
-cat("Petitions with valid petition_percentile_combined:",
+    sum(!is.na(h1b_sim$PW_WAGE_LEVEL)), "\n")
+cat("Petitions with valid percentile (petition_percentile_combined):",
     sum(!is.na(h1b_sim$petition_percentile_combined)), "\n\n")
 
 # =============================================================================
-# STEP 2: FILTER TO PETITIONS THAT CLEAR THE NEW THRESHOLD
-# =============================================================================
-#
-# Under the proposed rules, only petitions whose current pay is at or above
-# the new percentile floor for their assigned wage level would satisfy the
-# prevailing wage requirement. We restrict the analysis to this "surviving"
-# pool — petitions that clear the new floor.
-#
-# Petitions that do not clear the new floor are flagged separately so we can
-# report their share of the total.
-#
+# STEP 2: FILTER TO PETITIONS THAT QUALIFY UNDER PROPOSED SYSTEM
 # =============================================================================
 
-h1b_above_threshold <- h1b_sim %>%
-  filter(
-    !is.na(applicable_threshold),
-    !is.na(petition_percentile_combined),
-    petition_percentile_combined >= applicable_threshold
-  )
+# Petitions that qualify (meet the new percentile threshold)
+h1b_qualified <- h1b_sim %>%
+  filter(qualifies == TRUE)
 
-h1b_below_threshold <- h1b_sim %>%
-  filter(
-    !is.na(applicable_threshold),
-    !is.na(petition_percentile_combined),
-    petition_percentile_combined < applicable_threshold
-  )
+# Petitions that don't qualify
+h1b_not_qualified <- h1b_sim %>%
+  filter(qualifies == FALSE | is.na(qualifies))
 
-n_evaluable   <- nrow(h1b_above_threshold) + nrow(h1b_below_threshold)
-n_above       <- nrow(h1b_above_threshold)
-n_below       <- nrow(h1b_below_threshold)
+n_evaluable <- sum(!is.na(h1b_sim$qualifies))
+n_qualified <- nrow(h1b_qualified)
+n_not_qualified <- nrow(h1b_not_qualified)
 
 cat("-------------------------------------------------------------\n")
-cat("Petitions evaluable (valid level + valid percentile):", n_evaluable, "\n")
-cat("Petitions that CLEAR the new threshold:", n_above,
-    sprintf("(%.1f%% of evaluable)\n", 100 * n_above / n_evaluable))
-cat("Petitions BELOW the new threshold:", n_below,
-    sprintf("(%.1f%% of evaluable)\n", 100 * n_below / n_evaluable))
+cat("Petitions evaluable (have Mincer wages + percentile):", n_evaluable, "\n")
+cat("Petitions that QUALIFY under proposed system:", n_qualified,
+    sprintf("(%.1f%% of evaluable)\n", 100 * n_qualified / n_evaluable))
+cat("Petitions that DO NOT QUALIFY:", n_not_qualified,
+    sprintf("(%.1f%% of evaluable)\n", 100 * n_not_qualified / n_evaluable))
 cat("-------------------------------------------------------------\n\n")
 
 # =============================================================================
-# STEP 3: CALCULATE UNDERPAYMENT AMONG PETITIONS THAT CLEAR THE THRESHOLD
+# STEP 3: CALCULATE UNDERPAYMENT AMONG PETITIONS THAT QUALIFY
 # =============================================================================
 #
-# Among petitions that clear the new wage floor, we ask: what share are still
-# paid less than the Mincer-based occupational median (pw_p50) for their
-# specific education level, years of experience, occupation, and metro area?
-#
-# pw_p50 is derived from the Mincer estimation script and represents the
-# median wage for a worker with the same qualifications in the same occupation
-# and area. A petition is "underpaid" if petition_annual_pay_clean < pw_p50.
-#
-# We restrict to petitions with non-missing pw_p50 for this calculation.
+# Among petitions that qualify under the proposed system, how many are still
+# underpaid relative to the Mincer median (pw_p50)?
 #
 # =============================================================================
 
-h1b_underpayment <- h1b_above_threshold %>%
-  filter(!is.na(pw_p50))
-
-n_with_mincer_wage <- nrow(h1b_underpayment)
-n_underpaid        <- sum(h1b_underpayment$petition_annual_pay_clean < h1b_underpayment$pw_p50)
-n_adequately_paid  <- n_with_mincer_wage - n_underpaid
-share_underpaid    <- n_underpaid / n_with_mincer_wage
+n_qualified_evaluable <- sum(!is.na(h1b_qualified$underpaid_vs_mincer))
+n_underpaid <- sum(h1b_qualified$underpaid_vs_mincer, na.rm = TRUE)
+n_adequately_paid <- n_qualified_evaluable - n_underpaid
+share_underpaid <- n_underpaid / n_qualified_evaluable
 
 cat("=============================================================\n")
 cat("UNDERPAYMENT RESULTS\n")
 cat("=============================================================\n")
-cat("Among petitions clearing the new threshold with valid Mincer wages:\n\n")
-cat("  Total petitions evaluated:    ", n_with_mincer_wage, "\n")
-cat("  Paid below Mincer median:     ", n_underpaid,
+cat("Among petitions qualifying under the proposed system:\n\n")
+cat("  Total petitions evaluated:    ", n_qualified_evaluable, "\n")
+cat("  Paid below Mincer median (pw_p50):     ", n_underpaid,
     sprintf("(%.1f%%)\n", 100 * share_underpaid))
 cat("  Paid at or above Mincer median:", n_adequately_paid,
     sprintf("(%.1f%%)\n", 100 * (1 - share_underpaid)))
@@ -202,21 +174,16 @@ cat("-------------------------------------------------------------\n\n")
 # =============================================================================
 # STEP 4: BREAKDOWN BY WAGE LEVEL
 # =============================================================================
-#
-# Underpayment rates often differ substantially across wage levels. Level I
-# petitions (entry-level per the employer's description) may have very
-# different underpayment rates than Level IV (fully competent) petitions.
-#
-# =============================================================================
 
-cat("Underpayment by assigned wage level:\n\n")
+cat("Qualification and underpayment by assigned wage level:\n\n")
 
-underpayment_by_level <- h1b_underpayment %>%
+breakdown_by_level <- h1b_sim %>%
+  filter(!is.na(qualifies)) %>%
   group_by(PW_WAGE_LEVEL) %>%
   summarise(
-    n_petitions    = n(),
-    n_underpaid    = sum(petition_annual_pay_clean < pw_p50),
-    share_underpaid = mean(petition_annual_pay_clean < pw_p50),
+    n_petitions = n(),
+    n_qualified = sum(qualifies, na.rm = TRUE),
+    share_qualified = mean(qualifies, na.rm = TRUE),
     .groups = "drop"
   ) %>%
   arrange(PW_WAGE_LEVEL) %>%
@@ -227,15 +194,36 @@ underpayment_by_level <- h1b_underpayment %>%
       PW_WAGE_LEVEL == "III" ~ pw_level_III_threshold,
       PW_WAGE_LEVEL == "IV"  ~ pw_level_IV_threshold
     ),
+    share_qualified_pct = paste0(round(100 * share_qualified, 1), "%")
+  ) %>%
+  select(PW_WAGE_LEVEL, threshold, n_petitions, n_qualified, share_qualified_pct)
+
+cat("Qualification rates:\n")
+print(breakdown_by_level)
+cat("\n")
+
+# Among those who qualify, how many are underpaid?
+underpayment_by_level <- h1b_qualified %>%
+  filter(!is.na(underpaid_vs_mincer)) %>%
+  group_by(PW_WAGE_LEVEL) %>%
+  summarise(
+    n_petitions = n(),
+    n_underpaid = sum(underpaid_vs_mincer, na.rm = TRUE),
+    share_underpaid = mean(underpaid_vs_mincer, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(PW_WAGE_LEVEL) %>%
+  mutate(
     share_underpaid_pct = paste0(round(100 * share_underpaid, 1), "%")
   ) %>%
-  select(PW_WAGE_LEVEL, threshold, n_petitions, n_underpaid, share_underpaid_pct)
+  select(PW_WAGE_LEVEL, n_petitions, n_underpaid, share_underpaid_pct)
 
+cat("Underpayment among qualified petitions:\n")
 print(underpayment_by_level)
 cat("\n")
 
 # =============================================================================
-# STEP 6: SUMMARY TABLE FOR REPORTING
+# STEP 5: SUMMARY TABLE FOR REPORTING
 # =============================================================================
 
 cat("=============================================================\n")
@@ -250,17 +238,17 @@ cat(sprintf(
   pw_level_III_threshold, pw_level_IV_threshold
 ))
 cat(sprintf(
-  "  %.1f%% of evaluable petitions fall below the new wage floor\n",
-  100 * n_below / n_evaluable
+  "  %.1f%% of evaluable petitions do not meet the new percentile threshold\n",
+  100 * n_not_qualified / n_evaluable
 ))
 cat(sprintf(
-  "  Among petitions clearing the new floor, %.1f%% remain underpaid\n",
+  "  Among petitions that qualify, %.1f%% remain underpaid\n",
   100 * share_underpaid
 ))
 cat(sprintf(
-  "  relative to the Mincer-estimated occupational median for their\n"
+  "  relative to the Mincer median (pw_p50) for their specific\n"
 ))
 cat(sprintf(
-  "  specific education, experience, occupation, and metro area.\n"
+  "  education, experience, occupation, and metro area.\n"
 ))
 cat("=============================================================\n")
