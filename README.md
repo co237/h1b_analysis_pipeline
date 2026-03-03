@@ -8,9 +8,10 @@ This project reconstructs the universe of H-1B petitions filed in FY 2022-2024 a
 
 **Key Features:**
 - Estimates worker-specific prevailing wages based on education and experience using Mincer earnings equations
-- Accounts for geographic wage variation through area fixed effects and OFLC wage anchors
+- Combines occupation-specific OFLC Level 3 wages with aggregated Mincer ratios from national models
+- Accounts for geographic wage variation through area fixed effects and MSA-specific OFLC anchors
 - Provides tools for simulating policy scenarios with custom percentile thresholds
-- Processes ~273,000 H-1B petitions (FY 2022-2024) with 72.5% successful wage matching
+- Processes ~273,000 H-1B petitions (FY 2022-2024) with 76.5% successful wage matching
 
 ## Quick Start
 
@@ -116,7 +117,7 @@ Calculates each petition's estimated percentile rank within its occupation using
 - Calculates education-experience ratios by predicting wages across all areas, weighting by ACS person weights (PERWT), and comparing to national median
 - Stores one ratio per (occupation, education, experience) combination
 
-**Hierarchical Fallback:** 6-digit SOC → 5-digit → 3-digit → 2-digit → pooled (minimum 100 observations)
+**Hierarchical Fallback:** 6-digit SOC → 5-digit → 3-digit → 2-digit → pooled (minimum 100 observations, all models include area FE)
 
 **Output:**
 - `data/processed/mincer_edu_exp_ratios.csv` (119,638 ratios for 377 occupations)
@@ -125,19 +126,28 @@ Calculates each petition's estimated percentile rank within its occupation using
 ### Step 5: Apply Mincer Wages to H-1B Petitions (Script 05)
 **Runtime:** ~10-15 minutes
 
-Applies Mincer-based prevailing wages to each petition using the formula:
+Applies Mincer-based prevailing wages to each petition by combining:
+1. **Specific OFLC wages**: Each occupation's Level 3 wage in each MSA (e.g., 17-2171 Petroleum Engineers in Houston)
+2. **Aggregated Mincer ratios**: Education-experience premiums from national models (e.g., all 17-21XX engineers share the same ratios)
 
+**Formula:**
 ```
-pw_percentile = ratio[occupation, education, experience] × OFLC_Level3[occupation, area]
+pw_p50 = OFLC_Level3[specific_SOC, MSA] × ratio_p50[aggregated_ACS_code, education, experience]
 ```
 
-**Two-Stage Geographic Fallback:**
-1. **Education/experience adjustments:** Use ratios from national model (place-invariant)
-2. **Wage anchor:** Try MSA-level OFLC wage first, fall back to national if unavailable
+**Example:**
+- **Petroleum Engineers (17-2171)** and **Mechanical Engineers (17-2141)** have different OFLC wages
+- Both use the same Mincer ratios from the **1721XX Engineers** model
+- Result: Occupation-specific wages adjusted for individual education/experience
+
+**SOC Code Handling:**
+- FY2021-2022 OFLC data uses SOC 2010 codes (e.g., 15-1132, 15-1133)
+- Script converts to SOC 2018 format (e.g., 15-1252) and aggregates when multiple 2010 codes map to one 2018 code
+- Ensures petitions match correctly across all fiscal years
 
 **Output:** `data/processed/h1b_with_mincer_wages.csv` (~370 MB)
 
-**Success Rate:** 198,407 petitions with valid Mincer wages (72.5% of total)
+**Success Rate:** 209,129 petitions with valid Mincer wages (76.5% of total)
 
 **Note:** Steps 4 and 5 should run in the same R session. Script 05 will automatically run Script 04 if needed.
 
@@ -197,7 +207,9 @@ log(wage) = α + β₁·exp + β₂·exp² + β₃·exp³ + β₄·exp⁴ + Σγ
    - Weight by PERWT (ACS person weights summed by area)
    - Calculate weighted average predicted wage
    - Compare to national median → store ratio
-3. Apply to petitions: `wage = ratio[occ, edu, exp] × OFLC_Level3[occ, area]`
+3. Apply to petitions: `wage = ratio[aggregated_ACS_code, edu, exp] × OFLC_Level3[specific_SOC, MSA]`
+   - **OFLC wages are occupation-specific** (17-2171 Petroleum Engineers ≠ 17-2141 Mechanical Engineers)
+   - **Mincer ratios are aggregated** (all 17-21XX engineers share the same education-experience premiums)
 
 ### Occupation Code Harmonization
 
@@ -214,26 +226,29 @@ log(wage) = α + β₁·exp + β₂·exp² + β₃·exp³ + β₄·exp⁴ + Σγ
 - FY2023+ crosswalk: 100% coverage
 - FY2021-2022 crosswalk: 87.6% coverage (383,227 / 437,593 OFLC wage entries)
 
-### Two-Stage Geographic Fallback
+### Geographic Handling
 
-Mincer coefficients and OFLC wage anchors fall back independently:
+The wage calculation combines national and area-specific components:
 
-1. **Mincer ratios:** Use national model ratios (place-invariant education/experience premiums)
-2. **Wage anchor:** Try MSA-level OFLC wage → fall back to national if unavailable
+1. **Mincer ratios:** Place-invariant education/experience premiums from national models
+2. **OFLC wage anchor:** Area-specific wage levels from OFLC prevailing wage tables
 
-**Example:** A junior software developer in Boise might use:
-- National Mincer ratio for (Software Developer, Bachelor's, 3 years experience)
-- MSA-level OFLC wage for Software Developers in Boise
-- Final wage: `National_Ratio × Boise_OFLC_Wage`
+**Example:** A junior software developer (15-1252) in Boise uses:
+- National Mincer ratio for (151252, Bachelor's, 3 years experience) = 0.85
+- Boise MSA OFLC Level 3 wage for SOC 15-1252 = $110,000
+- Final wage: `0.85 × $110,000 = $93,500`
+
+**Important:** If OFLC doesn't publish a wage for a specific SOC-area combination (e.g., rare occupation in small metro), the petition receives NA. This ensures we only produce wages where OFLC provides official prevailing wage data for that specific occupation.
 
 ## Results Summary
 
 ### Coverage Statistics
 - **Total H-1B petitions:** 273,546 (FY 2022-2024)
-- **Petitions with valid Mincer wages:** 198,407 (72.5%)
+- **Petitions with valid Mincer wages:** 209,129 (76.5%)
 - **Occupations with Mincer models:** 377
 - **Education-experience ratios:** 119,638
-- **Model fallbacks to broader occupations:** 0 (all occupations fit at 6-digit level)
+- **Unique SOC codes in petitions:** 378
+- **Unique ACS codes (aggregated for Mincer):** 213
 
 ### NPRM Simulation Results (34th, 52nd, 70th, 88th Percentile Thresholds)
 - **Petitions that qualify:** 23.8% (47,289 / 198,407)
@@ -274,9 +289,11 @@ source("scripts/05 Apply new PWs to H1B petitions.R")
 ```
 
 ### Missing Occupation Matches
-Some petitions (~27.5%) don't receive Mincer wages due to:
-- Missing required fields (education, MSA, occupation): 23.5%
-- No matching OFLC/Mincer data despite complete fields: 4.0%
+Some petitions (~23.5%) don't receive Mincer wages due to:
+- Missing required fields (education primarily): 23.5%
+- No matching OFLC/Mincer data despite complete fields: <0.1%
+
+The vast majority of missing wages are due to missing education codes in the petition data, not failures in the matching logic.
 
 ### Crosswalk Coverage Gaps
 - FY2021-2022: 12.4% of OFLC codes couldn't be mapped to ACS 2018

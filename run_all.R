@@ -150,10 +150,10 @@ tryCatch({
   cat(sprintf("\n✓ Step 4 completed in %.1f minutes\n", step4_time))
 
   # Verify model objects were created
-  if (!exists("occ_area_models") || !exists("oflc_bases") || !exists("predict_wage")) {
-    stop("Step 4 did not create required objects: occ_area_models, oflc_bases, predict_wage")
+  if (!exists("occ_edu_exp_ratios") || !exists("oflc_bases")) {
+    stop("Step 4 did not create required objects: occ_edu_exp_ratios, oflc_bases")
   }
-  cat("Mincer model objects created in memory\n")
+  cat("Mincer education-experience ratios and OFLC data loaded in memory\n")
 
   if (!file.exists("output/tables/occ_model_coefficients.csv")) {
     warning("Expected output file not found: output/tables/occ_model_coefficients.csv")

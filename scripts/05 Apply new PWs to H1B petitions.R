@@ -4,16 +4,18 @@
 #
 # PURPOSE:
 #   For each H-1B petition, calculate four prevailing wage levels (50th, 62nd,
-#   75th, and 90th percentiles) based on:
-#     1. OFLC Level 3 wage for the occupation and area
-#     2. Mincer equation adjustments for education and experience
+#   75th, and 90th percentiles) by combining:
+#     1. Occupation-specific OFLC Level 3 wages (e.g., 17-2171 Petroleum Engineers)
+#     2. Aggregated Mincer ratios for education-experience (e.g., 1721XX all engineers)
+#
+#   This preserves occupation-specific wage differences while applying consistent
+#   education-experience adjustments from national Mincer models.
 #
 # PREREQUISITES:
 #   Script 04 must have been run in the same session so that the following
 #   objects are available in memory:
-#     - occ_area_models  — list of fitted Mincer models by occupation and area
-#     - oflc_bases       — nested list of OFLC wage tables by type and year
-#     - predict_wage()   — wage prediction function
+#     - occ_edu_exp_ratios — education-experience ratios by occupation
+#     - oflc_bases         — nested list of OFLC wage tables by type and year
 #
 # INPUT:
 #   data/processed/h1b_with_percentiles_and_native_comps.csv
@@ -23,28 +25,25 @@
 # OUTPUT:
 #   data/processed/h1b_with_mincer_wages.csv
 #     - Same petitions with four new columns: pw_p50, pw_p62, pw_p75, pw_p90
-#     - Success rate: ~71% of petitions get valid wages
-#     - Remaining ~29% get NA (missing education, MSA, or no matching OFLC/Mincer data)
+#     - Success rate: ~76% of petitions get valid wages (209,129 / 273,546)
+#     - Remaining ~24% get NA (primarily due to missing education codes)
 #
-# CRITICAL FIXES IMPLEMENTED:
-#   1. HYPHEN STRIPPING: H-1B data has "17-21YY", OFLC has "1721XX"
-#      → Strip hyphens from H-1B ACS_OCCSOC before joining
+# KEY IMPLEMENTATION DETAILS:
+#   1. SPECIFIC OFLC WAGES: Each SOC code keeps its own OFLC Level 3 wage
+#      → 17-2171 Petroleum Engineers ≠ 17-2141 Mechanical Engineers
 #
-#   2. WILDCARD NORMALIZATION: H-1B uses "YY", OFLC uses "XX"
-#      → Convert all "YY" → "XX" for consistent matching
-#      (Original crosswalk from Script 03 uses "YY" for some occupation groups,
-#       FY2021-2022 crosswalk uses "XX" for all groups)
+#   2. AGGREGATED MINCER RATIOS: Education-experience premiums are aggregated by ACS code
+#      → All 17-21XX engineers share the same ratios (1721YY Mincer model)
 #
-#   3. OFLC DEDUPLICATION: Multiple SOC codes map to same ACS code
-#      → Aggregate OFLC wages by (ACS_OCCSOC, MSA, Year) using median
-#      (Example: SOC 17-2111, 17-2112, 17-2151 all → ACS "1721XX")
-#      → Prevents many-to-many joins that would create duplicate petition rows
+#   3. SOC 2010→2018 CONVERSION: FY2021-2022 OFLC data converted from 2010 to 2018 format
+#      → Multiple 2010 codes (15-1132, 15-1133) → Single 2018 code (15-1252), aggregated
 #
-#   4. SOC_CODE FALLBACK: Petitions have both SOC_CODE and SOC_CODE_2010
-#      → Try SOC_CODE (2018) first, fall back to SOC_CODE_2010 if missing
+#   4. TWO MATCHING KEYS:
+#      → SOC_CODE_clean (specific, with XX) matches OFLC wages
+#      → ACS_OCCSOC (aggregated, with YY) matches Mincer ratios
 #
-# For detailed explanation of the entire wage calculation process, see:
-#   MINCER_WAGE_CALCULATION_EXPLAINED.md
+# For detailed explanation of the methodology, see:
+#   MINCER_METHODOLOGY.md
 #
 # =============================================================================
 
@@ -182,16 +181,21 @@ h1b_22_24 <- h1b_22_24 %>%
     #   The three-stage FY2021-2022 crosswalk standardized everything to "XX"
     #   for consistency with ACS vintage mappings.
     #
-    # FIX:
-    #   Standardize all "YY" → "XX" in H-1B data before joining
-    #   "1721YY" → "1721XX"
+    # OLD FIX (NOW REMOVED):
+    #   Previously normalized: ACS_OCCSOC = gsub("YY$", "XX", ACS_OCCSOC)
     #
-    # IMPACT:
-    #   Before: 7,408 petitions with "1721YY" got NA wages
-    #   After:  These petitions successfully match OFLC "1721XX" data
-    #   Overall improvement: +4,531 petitions with valid wages
+    # NEW APPROACH:
+    #   - Keep ACS_OCCSOC with "YY" wildcards (e.g., "1721YY")
+    #   - This matches the Mincer ratios file which uses "YY"
+    #   - For OFLC matching, use SOC_CODE_clean (created below) with "XX"
     #
-    ACS_OCCSOC = gsub("YY$", "XX", ACS_OCCSOC)
+    # TWO SEPARATE KEYS:
+    #   1. ACS_OCCSOC (with YY) → joins to Mincer education-experience ratios
+    #   2. SOC_CODE_clean (with XX) → joins to OFLC specific SOC wages
+    #
+    # This allows:
+    #   - Aggregated Mincer models (1721YY for all engineers)
+    #   - Specific OFLC wages (17-2171 for petroleum engineers)
     #
     # =========================================================================
   )
@@ -216,8 +220,41 @@ unique_combos <- h1b_22_24 %>%
     !is.na(Years_pot_experience),
     !is.na(PW_year)
   ) %>%
-  mutate(MSA_code = as.character(MSA_code)) %>%
-  distinct(ACS_OCCSOC, MSA_code, highest_ed, Years_pot_experience, PW_year)
+  mutate(
+    MSA_code = as.character(MSA_code),
+    # Strip hyphens and normalize wildcards in SOC_CODE to match OFLC format
+    SOC_CODE_clean = as.character(gsub("-", "", SOC_CODE)),
+    SOC_CODE_clean = gsub("YY$", "XX", SOC_CODE_clean)
+  )
+
+# =============================================================================
+# Load SOC 2010→2018 crosswalk (used for OFLC data conversion below)
+# =============================================================================
+if (!exists("soc_10_18_xwalk")) {
+  cat("Loading SOC 2010→2018 crosswalk for OFLC data conversion...\n")
+  if (!requireNamespace("readxl", quietly = TRUE)) {
+    stop("Package 'readxl' is required. Install with: install.packages('readxl')")
+  }
+  soc_10_18_xwalk <- readxl::read_xlsx(
+    file.path(data_raw, "Other Data/soc_2010_to_2018_crosswalk.xlsx"),
+    skip = 8,
+    sheet = "Sorted by 2010"
+  ) %>%
+    select(SOC_2010 = `2010 SOC Code`, SOC_2018 = `2018 SOC Code`)
+  cat("Loaded", nrow(soc_10_18_xwalk), "SOC code mappings\n\n")
+}
+
+# Create bidirectional lookup tables
+soc_18_to_10 <- soc_10_18_xwalk %>%
+  mutate(
+    SOC_2010_clean = gsub("-", "", SOC_2010),
+    SOC_2018_clean = gsub("-", "", SOC_2018)
+  ) %>%
+  select(SOC_2018_clean, SOC_2010_clean) %>%
+  distinct()
+
+unique_combos <- unique_combos %>%
+  distinct(SOC_CODE_clean, ACS_OCCSOC, MSA_code, highest_ed, Years_pot_experience, PW_year)
 
 cat("Total H-1B petitions:", nrow(h1b_22_24), "\n")
 cat("Unique lookup combinations:", nrow(unique_combos), "\n")
@@ -249,69 +286,86 @@ oflc_alc_all_years <- bind_rows(
   })
 )
 
-# MSA-level wages
-# CRITICAL FIX 3: DEDUPLICATE OFLC DATA BEFORE JOINING
+cat("DIAGNOSTIC: OFLC data after stacking:\n")
+cat("  Total rows:", nrow(oflc_alc_all_years), "\n")
+cat("  Rows with NA ACS_OCCSOC:", sum(is.na(oflc_alc_all_years$ACS_OCCSOC)), "\n")
+cat("  Unique ACS_OCCSOC codes:", length(unique(oflc_alc_all_years$ACS_OCCSOC)), "\n")
+cat("  Sample ACS_OCCSOC values:", paste(head(sort(unique(oflc_alc_all_years$ACS_OCCSOC)), 10), collapse=", "), "\n\n")
+
+# MSA-level wages with 2010→2018 SOC conversion
 #
-# PROBLEM:
-#   The crosswalk maps multiple detailed SOC codes to aggregated ACS codes.
-#   For example, in FY2025 for MSA 1000005:
-#     SOC 11-1011 → ACS_OCCSOC "1110XX" → Level3 = $231,483
-#     SOC 11-1021 → ACS_OCCSOC "1110XX" → Level3 = $142,480
-#     SOC 11-1031 → ACS_OCCSOC "1110XX" → Level3 = $65,247
+# LOGIC:
+#   1. OFLC FY2021/2022 use 2010 SOC codes (e.g., 15-1132, 15-1133)
+#   2. Petitions use 2018 SOC codes (e.g., 15-1252)
+#   3. Convert OFLC 2010→2018 using crosswalk
+#   4. Aggregate when multiple 2010 codes map to one 2018 code
 #
-#   If we join H-1B petitions (which use aggregated ACS codes) directly with
-#   this OFLC data, one petition with "1110XX" would match ALL THREE rows,
-#   creating duplicate petition records in the output.
+#   Example conversion:
+#     2010: 15-1132 (Software Developers, Applications) → Level3 = $95K
+#     2010: 15-1133 (Software Developers, Systems)      → Level3 = $105K
+#     → 2018: 15-1252 (Software Developers)             → Level3 = $100K (median)
 #
-#   Before this fix: 273,546 input petitions → 577,964 output rows (2.1x inflation!)
-#   After this fix:  273,546 input petitions → 273,546 output rows (correct)
-#
-# SOLUTION:
-#   Aggregate OFLC data by (ACS_OCCSOC, MSA, Year) and take the MEDIAN Level3
-#   wage when multiple SOC codes map to the same ACS code. This gives one
-#   representative wage per ACS occupation-area-year combination.
-#
-# WHY MEDIAN?:
-#   Robust to outliers. Some detailed occupations might have extreme wages
-#   that would skew a mean.
+#   This ensures no duplicates while preserving specific wages where possible.
 #
 oflc_msa <- oflc_alc_all_years %>%
   filter(!is.na(Level3)) %>%
   select(SocCode, Area, PW_year, Level3, ACS_OCCSOC) %>%
   rename(MSA_code = Area) %>%
-  mutate(MSA_code = as.character(MSA_code)) %>%
-  group_by(ACS_OCCSOC, MSA_code, PW_year) %>%
+  mutate(
+    MSA_code = as.character(MSA_code),
+    # Clean SOC code (strip hyphens)
+    SOC_CODE_clean = gsub("-", "", SocCode),
+    SOC_CODE_clean = gsub("YY$", "XX", SOC_CODE_clean)
+  ) %>%
+  # Convert 2010 SOC codes to 2018 format for FY2021/2022
+  left_join(
+    soc_18_to_10 %>% rename(SOC_2010_clean = SOC_2010_clean, SOC_2018_clean = SOC_2018_clean),
+    by = c("SOC_CODE_clean" = "SOC_2010_clean")
+  ) %>%
+  mutate(
+    # For FY2021/2022: use converted 2018 code if available
+    # For FY2023+: keep original code (already in 2018 format)
+    SOC_CODE_clean = ifelse(
+      PW_year %in% c(2021, 2022) & !is.na(SOC_2018_clean),
+      SOC_2018_clean,
+      SOC_CODE_clean
+    )
+  ) %>%
+  select(-SOC_2018_clean) %>%
+  # Aggregate when multiple 2010 codes map to one 2018 code
+  group_by(SOC_CODE_clean, MSA_code, PW_year) %>%
   summarise(
-    Level3 = median(Level3, na.rm = TRUE),  # Take median across SOC codes
-    SocCode = first(SocCode),                # Keep one representative SOC code
+    Level3 = median(Level3, na.rm = TRUE),
+    ACS_OCCSOC = first(ACS_OCCSOC),
     .groups = "drop"
   )
 
-# National fallback wages
-# Apply same deduplication logic for national-level wages
-oflc_national_oes <- oflc_alc_all_years %>%
-  filter(GeoLvl == "N", !is.na(Level3)) %>%
-  select(SocCode, PW_year, Level3, ACS_OCCSOC) %>%
-  group_by(ACS_OCCSOC, PW_year) %>%
-  summarise(
-    Level3_national = median(Level3, na.rm = TRUE),
-    SocCode_national = first(SocCode),
-    .groups = "drop"
-  )
+cat("DIAGNOSTIC: After OFLC processing:\n")
+cat("  Total rows:", nrow(oflc_msa), "\n")
+cat("  Unique (SOC_CODE, MSA, Year) combos:",
+    n_distinct(oflc_msa$SOC_CODE_clean, oflc_msa$MSA_code, oflc_msa$PW_year), "\n")
+cat("  Sample rows:\n")
+print(head(oflc_msa %>% select(SOC_CODE_clean, ACS_OCCSOC, MSA_code, PW_year, Level3), 10))
+cat("\n")
 
 # Join MSA-level first, fill gaps with national
 # NOTE: Join by ACS_OCCSOC (not SocCode) to handle both SOC 2018 and SOC 2010 vintages
+
+cat("DIAGNOSTIC: Before OFLC join:\n")
+cat("  unique_combos rows:", nrow(unique_combos), "\n")
+cat("  Sample unique_combos:\n")
+print(head(unique_combos[, c("ACS_OCCSOC", "MSA_code", "PW_year")], 10))
+cat("\n")
+
 unique_combos <- unique_combos %>%
-  left_join(oflc_msa,
-            by = c("ACS_OCCSOC", "MSA_code", "PW_year")) %>%
-  left_join(oflc_national_oes,
-            by = c("ACS_OCCSOC", "PW_year")) %>%
-  mutate(
-    Level3_used   = ifelse(!is.na(Level3), Level3, Level3_national),
-    SocCode_used  = ifelse(!is.na(SocCode), SocCode, SocCode_national),
-    oflc_geo_used = ifelse(!is.na(Level3), as.character(MSA_code), "National fallback")
-  ) %>%
-  select(-Level3, -Level3_national, -SocCode, -SocCode_national)
+  left_join(oflc_msa %>% select(SOC_CODE_clean, MSA_code, PW_year, Level3),
+            by = c("SOC_CODE_clean", "MSA_code", "PW_year"),
+            relationship = "many-to-many") %>%
+  rename(Level3_used = Level3)
+
+cat("DIAGNOSTIC: After OFLC join:\n")
+cat("  Combos with Level3_used:", sum(!is.na(unique_combos$Level3_used)), "\n")
+cat("  Combos with NA Level3_used:", sum(is.na(unique_combos$Level3_used)), "\n\n")
 
 # --- 2b. Join education-experience ratios (NEW METHODOLOGY) ---
 #
@@ -335,6 +389,13 @@ unique_combos <- unique_combos %>%
   mutate(Years_pot_experience_rounded = round(Years_pot_experience))
 
 # Join ratios by (occupation, education, rounded experience)
+
+cat("DIAGNOSTIC: Before ratio join:\n")
+cat("  unique_combos with Level3_used:", sum(!is.na(unique_combos$Level3_used)), "\n")
+cat("  Sample unique_combos keys:\n")
+print(head(unique_combos[!is.na(unique_combos$Level3_used), c("ACS_OCCSOC", "highest_ed", "Years_pot_experience_rounded")], 10))
+cat("\n")
+
 unique_combos <- unique_combos %>%
   left_join(
     occ_edu_exp_ratios %>%
@@ -344,6 +405,10 @@ unique_combos <- unique_combos %>%
            "highest_ed" = "highest_ed",
            "Years_pot_experience_rounded" = "Years_pot_experience")
   )
+
+cat("DIAGNOSTIC: After ratio join:\n")
+cat("  Combos with ratio_p50:", sum(!is.na(unique_combos$ratio_p50)), "\n")
+cat("  Combos with Level3_used AND ratio_p50:", sum(!is.na(unique_combos$Level3_used) & !is.na(unique_combos$ratio_p50)), "\n\n")
 
 # --- 2c. Apply ratios to OFLC Level 3 wages ---
 # Much simpler than before - just multiply!
@@ -357,8 +422,10 @@ unique_combos <- unique_combos %>%
     pw_oflc_median = Level3_used,
     pw_model_used  = model_level
   ) %>%
-  select(ACS_OCCSOC, MSA_code, highest_ed, Years_pot_experience, PW_year,
-         pw_p50, pw_p62, pw_p75, pw_p90, pw_oflc_median, pw_model_used, SocCode_used)
+  select(SOC_CODE_clean, ACS_OCCSOC, MSA_code, highest_ed, Years_pot_experience, PW_year,
+         pw_p50, pw_p62, pw_p75, pw_p90, pw_oflc_median, pw_model_used) %>%
+  # Ensure no duplicate keys (should not be necessary, but adding as safeguard)
+  distinct(SOC_CODE_clean, ACS_OCCSOC, MSA_code, highest_ed, Years_pot_experience, PW_year, .keep_all = TRUE)
 
 cat("Wage prediction complete.\n")
 cat("Combinations with valid wages:", sum(!is.na(unique_combos$pw_p50)), "\n")
@@ -369,11 +436,17 @@ cat("Combinations with NA wages:   ", sum(is.na(unique_combos$pw_p50)), "\n\n")
 # =============================================================================
 
 h1b_22_24 <- h1b_22_24 %>%
-  mutate(MSA_code = as.character(MSA_code)) %>%
+  mutate(
+    MSA_code = as.character(MSA_code),
+    SOC_CODE_clean = as.character(gsub("-", "", SOC_CODE)),
+    SOC_CODE_clean = gsub("YY$", "XX", SOC_CODE_clean)
+  ) %>%
+  # Join to unique_combos (OFLC data already converted to 2018 SOC format)
   left_join(
     unique_combos,
-    by = c("ACS_OCCSOC", "MSA_code", "highest_ed",
-           "Years_pot_experience", "PW_year")
+    by = c("SOC_CODE_clean", "ACS_OCCSOC", "MSA_code", "highest_ed",
+           "Years_pot_experience", "PW_year"),
+    relationship = "many-to-one"
   )
 
 # =============================================================================

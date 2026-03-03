@@ -2,7 +2,7 @@
 
 **Technical Documentation for H-1B Prevailing Wage Estimation**
 
-Last Updated: 2026-03-02
+Last Updated: 2026-03-03
 
 ---
 
@@ -111,7 +111,9 @@ log(wage) = α + β₁·exp + β₂·exp² + β₃·exp³ + β₄·exp⁴ + Σγ
 
 3. **Store ratios** by (occupation, education, experience)
 
-4. **Apply to petitions**: `wage = ratio[occ, edu, exp] × OFLC_Level3[occ, area]`
+4. **Apply to petitions**: `wage = ratio[aggregated_ACS_code, edu, exp] × OFLC_Level3[specific_SOC, MSA]`
+   - **OFLC wages**: Occupation-specific (17-2171 Petroleum Engineers ≠ 17-2141 Mechanical Engineers)
+   - **Mincer ratios**: Aggregated by ACS code (all 17-21XX engineers share ratios)
 
 ### Why Weighted Averaging?
 
@@ -238,27 +240,59 @@ ACS_OCCSOC = gsub("YY$", "XX", ACS_OCCSOC)
 5. **Strip hyphens** from ACS_OCCSOC codes (e.g., "17-21XX" → "1721XX")
 6. **Select relevant fields**: Area, SocCode, GeoLvl, Level3, ACS_OCCSOC
 
-### Handling Multiple SOC → Same ACS Code
+### SOC 2010 → SOC 2018 Conversion
 
-**Problem:** Multiple detailed SOC codes may map to the same aggregated ACS code:
+**Challenge:** FY2021-2022 OFLC data uses SOC 2010 codes, but petitions use SOC 2018 codes.
 
+**Example:**
 ```
-SOC 2010        →  ACS 2018    OFLC Level 3 Wage
------------        ---------    ------------------
-17-2111         →  1721XX       $101,837 (Health/Safety Engineers)
-17-2112         →  1721XX       $78,915  (Industrial Engineers)
-17-2151         →  1721XX       $95,432  (Mining Engineers)
+SOC 2010 (OFLC FY2021)     →  SOC 2018 (Petitions)    OFLC Level 3 Wage
+-----------------------        --------------------    ------------------
+15-1132 (App Developers)   →  15-1252                 $101,837
+15-1133 (Systems Dev)      →  15-1252                 $95,432
 ```
 
-**Solution:** Aggregate by (ACS_OCCSOC, Area, Year) and take **median** Level 3 wage:
+Multiple SOC 2010 codes map to a single SOC 2018 code.
+
+**Solution:** Convert OFLC 2010 codes to 2018 format and aggregate when multiple 2010 codes map to one 2018 code:
 
 ```r
 oflc_msa <- oflc_alc_all_years %>%
-  group_by(ACS_OCCSOC, MSA_code, PW_year) %>%
+  left_join(soc_10_to_18_crosswalk, by = "SOC_2010_clean") %>%
+  mutate(
+    SOC_CODE_clean = ifelse(
+      PW_year %in% c(2021, 2022) & !is.na(SOC_2018_clean),
+      SOC_2018_clean,
+      SOC_CODE_clean
+    )
+  ) %>%
+  group_by(SOC_CODE_clean, MSA_code, PW_year) %>%
   summarise(Level3 = median(Level3, na.rm = TRUE))
 ```
 
-**Rationale:** Median is robust to outliers and provides a representative wage for the aggregated occupation group.
+**Key Point:** This conversion happens in the OFLC data, NOT in the petition data. Petitions always use 2018 SOC codes. The result is that each petition matches to its specific SOC code's OFLC wage (e.g., 15-1252), which may be an aggregate of multiple 2010 codes.
+
+### Specific OFLC Wages × Aggregated Mincer Ratios
+
+**Important Design Decision:** The final wage calculation combines:
+
+1. **Occupation-specific OFLC wages** (17-2171 Petroleum Engineers ≠ 17-2141 Mechanical Engineers)
+2. **Aggregated Mincer ratios** (all 17-21XX engineers share the same education-experience premiums)
+
+**Example:**
+```
+Petroleum Engineer (17-2171), Houston, Bachelors, 10 years:
+  OFLC_Level3[17-2171, Houston] = $130,000 (specific to petroleum engineers)
+  Mincer_ratio[1721XX, Bachelors, 10 years] = 1.15 (shared by all 17-21XX engineers)
+  Final wage = $130,000 × 1.15 = $149,500
+
+Mechanical Engineer (17-2141), Houston, Bachelors, 10 years:
+  OFLC_Level3[17-2141, Houston] = $95,000 (specific to mechanical engineers)
+  Mincer_ratio[1721XX, Bachelors, 10 years] = 1.15 (same ratio as above)
+  Final wage = $95,000 × 1.15 = $109,250
+```
+
+**Rationale:** This approach preserves occupation-specific wage differences from OFLC while applying consistent education-experience adjustments from ACS Mincer models. Some ACS codes aggregate multiple occupations (e.g., 1721XX includes all engineers), so we use the aggregated ACS code for Mincer ratios.
 
 ---
 
@@ -300,13 +334,13 @@ Years_education = case_when(
 
 1. **Filter to occupation**: Select all ACS workers in this occupation
 2. **Check sample size**: Require ≥100 observations
-3. **Fit model** using `fixest::feols`:
+3. **Fit model with area FE** using `fixest::feols`:
    ```r
    model <- feols(
      log_incwage ~
        Years_pot_experience + I(Years_pot_experience^2) +
        I(Years_pot_experience^3) + I(Years_pot_experience^4) +
-       highest_ed | MET2013,
+       highest_ed | MET2013,  # Area fixed effects
      data = occ_data,
      weights = ~PERWT
    )
@@ -315,10 +349,12 @@ Years_education = case_when(
 5. **Store ratios** in data frame
 
 **Hierarchical Fallback** (if n < 100 at 6-digit level):
-- 5-digit SOC group (e.g., 15-125X)
-- 3-digit SOC group (e.g., 151XX)
-- 2-digit SOC group (e.g., 15XXX)
-- Fully pooled national model (all occupations)
+- 5-digit SOC group (e.g., 15-125X) with area FE
+- 3-digit SOC group (e.g., 151XX) with area FE
+- 2-digit SOC group (e.g., 15XXX) with area FE
+- Fully pooled national model (all occupations) with area FE
+
+**All models include area fixed effects** to ensure education and experience returns are place-invariant. Geographic wage variation is captured by the area-specific OFLC Level 3 wage anchor.
 
 **Result:** 119,638 education-experience ratios across 377 occupations (no fallbacks needed in current data)
 
@@ -330,6 +366,14 @@ NOTE: 72 fixed-effect singletons were removed (72 observations).
 ```
 
 **This is normal and expected.** It occurs when an area (MET2013) has only one observation for a particular occupation. The fixed effect for that area cannot be identified and is automatically dropped by `fixest`. This doesn't affect overall model quality.
+
+**Important:** When computing weighted averages across areas (see step 4 above), `predict()` returns NA for areas where singleton fixed effects were removed. The ratio calculation code uses `na.rm = TRUE` in the `sum()` function to properly handle these NA predictions:
+
+```r
+weighted_avg <- sum(pred_wage_levels * pred_data$weight_prop, na.rm = TRUE)
+```
+
+Without `na.rm = TRUE`, even a single NA prediction would cause the entire weighted average to be NA, making the ratio NA. Since most occupations have at least one singleton area, this would result in 96.7% of ratios being NA (as occurred in an earlier implementation).
 
 ### Education Level Filtering
 
@@ -424,17 +468,17 @@ Rather than process 273,546 petitions individually, we identify ~69,000 unique c
 
 **Step 1: Join OFLC wages**
 ```r
-# MSA-level wages
+# MSA-level wages only (no fallback)
 unique_combos <- unique_combos %>%
   left_join(oflc_msa,
-            by = c("ACS_OCCSOC", "MSA_code", "PW_year"))
-
-# National fallback
-unique_combos <- unique_combos %>%
-  left_join(oflc_national,
-            by = c("ACS_OCCSOC", "PW_year")) %>%
-  mutate(Level3_used = ifelse(!is.na(Level3), Level3, Level3_national))
+            by = c("ACS_OCCSOC", "MSA_code", "PW_year")) %>%
+  rename(Level3_used = Level3)
 ```
+
+**Coverage:**
+- Only uses OFLC wages where they're officially published for the occupation-area combination
+- If OFLC doesn't publish a wage (e.g., rare occupation in small metro), petition gets NA
+- No fallback to national wages - this ensures we only produce wages with OFLC backing
 
 **Step 2: Join Mincer ratios**
 ```r
@@ -582,6 +626,16 @@ h1b_22_24 <- h1b_22_24 %>%
 - Still captures substantial geographic wage variation
 - PUMA would be too granular (too many FEs, many singletons)
 
+### Decision 7: No OFLC Geographic Fallback
+
+**Choice:** Do not fall back to national OFLC wages when MSA-level wages are unavailable
+
+**Rationale:**
+- We only produce wages where OFLC publishes official prevailing wage data
+- Falling back to national wages would create wage estimates for occupation-area combinations OFLC doesn't recognize
+- Petitions in rare occupation-area combinations should receive NA, not fabricated wages
+- This is more conservative and defensible from a policy perspective
+
 ---
 
 ## Appendix: Common Questions
@@ -594,9 +648,9 @@ h1b_22_24 <- h1b_22_24 %>%
 
 **A:** No - Mincer equations are estimated once from pooled 2019-2023 ACS data. They capture the SHAPE of the education-experience wage curve, which is assumed stable. What changes by year is the OFLC Level 3 wage ANCHOR.
 
-### Q: What happens if a petition's MSA doesn't have OFLC data?
+### Q: What happens if OFLC doesn't publish a wage for a specific occupation-area combination?
 
-**A:** We fall back to the national-level OFLC wage for that occupation. This is a two-stage geographic fallback applied to the wage anchor only (ratios are already national).
+**A:** The petition receives NA wages. We do not fall back to national wages. This ensures we only produce wages where OFLC provides official prevailing wage data for that specific occupation-area combination.
 
 ### Q: Why quartic experience polynomial instead of linear or quadratic?
 

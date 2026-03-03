@@ -91,13 +91,16 @@ if (file.exists("config.R")) {
 # =============================================================================
 # KEY PARAMETER: MINIMUM OBSERVATION THRESHOLD
 # =============================================================================
-# Controls when the model bumps up to a broader SOC group (or drops the
-# area filter). If a cell has fewer unweighted ACS rows than this number,
-# we use a broader model instead.
+# Controls when the model broadens to a wider SOC group. If an occupation has
+# fewer than this many unweighted ACS observations, we estimate using a broader
+# occupation group instead (e.g., 5-digit → 3-digit → 2-digit → all occupations).
 #
-# The same threshold applies at every level of the fallback hierarchy.
-# 100 is a reasonable default — lower it for more granular coverage,
-# raise it for more conservative (stable) coefficient estimates.
+# ALL MODELS INCLUDE AREA FIXED EFFECTS to ensure place-invariant human capital
+# returns. The same threshold applies at every level of the fallback hierarchy.
+#
+# 100 is a reasonable default:
+#   - Lower (e.g., 50): More occupation-specific models, less stable estimates
+#   - Higher (e.g., 200): More stable estimates, more aggregation
 # =============================================================================
 
 min_obs_threshold <- 100
@@ -424,42 +427,22 @@ cat("Wage types:", paste(names(oflc_bases), collapse = ", "), "\n\n")
 #
 #   The OFLC Level3 is year-specific; everything else is fixed from the ACS.
 #
-# FALLBACK HIERARCHY (same threshold at every level):
-#   1. Area-specific (6-digit SOC + one metro)
-#   2. Occupation-wide (6-digit SOC, all metros)
-#   3. 5-digit SOC group
-#   4. 3-digit SOC group
-#   5. 2-digit SOC group
-#   6. Fully pooled national
+# FALLBACK HIERARCHY (all models include area fixed effects):
+#   1. 6-digit SOC (specific occupation, e.g., 15-1252 Software Developers)
+#   2. 5-digit SOC group (e.g., 15125X = all 15-125X developers)
+#   3. 3-digit SOC group (e.g., 151XX = all computer occupations)
+#   4. 2-digit SOC group (e.g., 15XXX = all computer/mathematical occupations)
+#   5. Fully pooled (all occupations combined)
+#
+# All models include area fixed effects (MET2013) to ensure education and
+# experience returns are place-invariant. Geographic wage variation is captured
+# by the area-specific OFLC Level 3 wage anchor.
 #
 # =============================================================================
 
-# Helper: fit a Mincer equation WITHOUT area fixed effects (used for fallback)
-fit_mincer <- function(data) {
-  tryCatch(
-    feols(
-      log_incwage ~
-        Years_pot_experience +
-        I(Years_pot_experience^2) +
-        I(Years_pot_experience^3) +
-        I(Years_pot_experience^4) +
-        highest_ed,
-      data    = data,
-      weights = ~PERWT
-    ),
-    error = function(e) NULL
-  )
-}
-
-# Helper: fit a Mincer equation WITH area fixed effects
-# Used for national models to capture place-invariant returns to education/experience
+# Helper: fit a Mincer equation with area fixed effects
+# All models use this function to ensure place-invariant human capital returns
 fit_mincer_with_area_fe <- function(data) {
-  # Only fit if we have multiple areas (otherwise FE is meaningless)
-  n_areas <- length(unique(data$MET2013[!is.na(data$MET2013)]))
-  if (n_areas < 2) {
-    return(NULL)  # Fall back to no-FE model
-  }
-
   tryCatch(
     feols(
       log_incwage ~
@@ -512,6 +495,9 @@ calculate_edu_exp_ratios <- function(model, occ_data, raw_median) {
   edu_exp_grid$predicted_wage <- NA_real_
   edu_exp_grid$ratio_p50 <- NA_real_
 
+  # DIAGNOSTIC FLAG: Set to TRUE for first failed occupation to debug
+  print_diagnostic <- FALSE
+
   for (i in seq_len(nrow(edu_exp_grid))) {
     # Create prediction data for all areas with this education and experience
     pred_data <- area_weights %>%
@@ -525,11 +511,30 @@ calculate_edu_exp_ratios <- function(model, occ_data, raw_median) {
 
     # Convert to levels and take weighted average
     pred_wage_levels <- exp(pred_log_wage)
-    weighted_avg <- sum(pred_wage_levels * pred_data$weight_prop)
+    weighted_avg <- sum(pred_wage_levels * pred_data$weight_prop, na.rm = TRUE)
 
     # Store results
     edu_exp_grid$predicted_wage[i] <- weighted_avg
     edu_exp_grid$ratio_p50[i] <- weighted_avg / raw_median
+
+    # DIAGNOSTIC: Print info for first prediction when diagnostic mode enabled
+    if (print_diagnostic && i == 1) {
+      cat("\n--- DIAGNOSTIC INFO ---\n")
+      cat("Area weights rows:", nrow(area_weights), "\n")
+      cat("Pred data rows:", nrow(pred_data), "\n")
+      cat("Pred log wage length:", length(pred_log_wage), "\n")
+      cat("NA predictions:", sum(is.na(pred_log_wage)), "\n")
+      cat("Weighted avg:", weighted_avg, "\n")
+      cat("Raw median:", raw_median, "\n")
+      cat("Ratio:", weighted_avg / raw_median, "\n")
+      if (sum(is.na(pred_log_wage)) > 0) {
+        cat("First few areas:\n")
+        print(head(pred_data))
+        cat("First few predictions:\n")
+        print(head(pred_log_wage))
+      }
+      cat("----------------------\n\n")
+    }
   }
 
   edu_exp_grid <- edu_exp_grid %>%
@@ -558,11 +563,9 @@ oflc_occ_area_pairs <- lapply(oflc_bases, function(type_list) {
   distinct() %>%
   filter(!is.na(ACS_OCCSOC))
 
-# Storage for fitted models and ratios.
-# NEW METHODOLOGY: Store education-experience ratios per occupation
-# OLD FALLBACK: Store coefficients for occupations without area FE
-occ_area_models <- list()    # Fallback storage (for models without area FE)
-occ_edu_exp_ratios <- NULL    # Primary storage (education-experience ratios)
+# Storage for education-experience ratios
+# Each occupation gets one set of ratios from a national model with area FE
+occ_edu_exp_ratios <- NULL
 
 cat("=============================================================\n")
 cat("Fitting NATIONAL Mincer models with area FE\n")
@@ -636,28 +639,6 @@ for (i in seq_along(occs_needed)) {
     }
   }
 
-  # Fall back to 6-digit without FE if area FE fails
-  if (is.null(edu_exp_ratios) && nrow(occ_data_6digit) >= min_obs_threshold) {
-    national_model <- fit_mincer(occ_data_6digit)
-    if (!is.null(national_model)) {
-      model_level <- "6-digit SOC (no area FE)"
-      # For models without area FE, we still calculate ratios but they won't
-      # account for geographic wage variation
-      fallback_coefs <- coef(national_model)
-      # Store coefficients for fallback prediction (old method)
-      occ_area_models[[paste0(occ, "__NATIONAL")]] <- list(
-        OCCSOC      = occ,
-        Area        = "NATIONAL",
-        coefs       = fallback_coefs,
-        raw_median  = raw_median,
-        ratio_p62   = ratio_p62,
-        ratio_p75   = ratio_p75,
-        ratio_p90   = ratio_p90,
-        model_level = model_level
-      )
-    }
-  }
-
   # Try broader SOC groups if 6-digit fails
   if (is.null(edu_exp_ratios)) {
     soc5_val  <- substr(occ, 1, 5)
@@ -667,23 +648,6 @@ for (i in seq_along(occs_needed)) {
       if (!is.null(national_model)) {
         model_level <- paste0("5-digit SOC group (", soc5_val, ") with area FE")
         edu_exp_ratios <- calculate_edu_exp_ratios(national_model, data_5dig, raw_median)
-      } else {
-        # Try without FE
-        national_model <- fit_mincer(data_5dig)
-        if (!is.null(national_model)) {
-          model_level <- paste0("5-digit SOC group (", soc5_val, ") no FE")
-          fallback_coefs <- coef(national_model)
-          occ_area_models[[paste0(occ, "__NATIONAL")]] <- list(
-            OCCSOC      = occ,
-            Area        = "NATIONAL",
-            coefs       = fallback_coefs,
-            raw_median  = raw_median,
-            ratio_p62   = ratio_p62,
-            ratio_p75   = ratio_p75,
-            ratio_p90   = ratio_p90,
-            model_level = model_level
-          )
-        }
       }
     }
   }
@@ -697,22 +661,6 @@ for (i in seq_along(occs_needed)) {
       if (!is.null(national_model)) {
         model_level <- paste0("3-digit SOC group (", soc3_val, ") with area FE")
         edu_exp_ratios <- calculate_edu_exp_ratios(national_model, data_3dig, raw_median)
-      } else {
-        national_model <- fit_mincer(data_3dig)
-        if (!is.null(national_model)) {
-          model_level <- paste0("3-digit SOC group (", soc3_val, ") no FE")
-          fallback_coefs <- coef(national_model)
-          occ_area_models[[paste0(occ, "__NATIONAL")]] <- list(
-            OCCSOC      = occ,
-            Area        = "NATIONAL",
-            coefs       = fallback_coefs,
-            raw_median  = raw_median,
-            ratio_p62   = ratio_p62,
-            ratio_p75   = ratio_p75,
-            ratio_p90   = ratio_p90,
-            model_level = model_level
-          )
-        }
       }
     }
   }
@@ -726,22 +674,6 @@ for (i in seq_along(occs_needed)) {
       if (!is.null(national_model)) {
         model_level <- paste0("2-digit SOC group (", soc2_val, ") with area FE")
         edu_exp_ratios <- calculate_edu_exp_ratios(national_model, data_2dig, raw_median)
-      } else {
-        national_model <- fit_mincer(data_2dig)
-        if (!is.null(national_model)) {
-          model_level <- paste0("2-digit SOC group (", soc2_val, ") no FE")
-          fallback_coefs <- coef(national_model)
-          occ_area_models[[paste0(occ, "__NATIONAL")]] <- list(
-            OCCSOC      = occ,
-            Area        = "NATIONAL",
-            coefs       = fallback_coefs,
-            raw_median  = raw_median,
-            ratio_p62   = ratio_p62,
-            ratio_p75   = ratio_p75,
-            ratio_p90   = ratio_p90,
-            model_level = model_level
-          )
-        }
       }
     }
   }
@@ -752,22 +684,6 @@ for (i in seq_along(occs_needed)) {
     if (!is.null(national_model)) {
       model_level <- "Fully pooled with area FE"
       edu_exp_ratios <- calculate_edu_exp_ratios(national_model, acs_data_19_23, raw_median)
-    } else {
-      national_model <- fit_mincer(acs_data_19_23)
-      if (!is.null(national_model)) {
-        model_level <- "Fully pooled no FE"
-        fallback_coefs <- coef(national_model)
-        occ_area_models[[paste0(occ, "__NATIONAL")]] <- list(
-          OCCSOC      = occ,
-          Area        = "NATIONAL",
-          coefs       = fallback_coefs,
-          raw_median  = raw_median,
-          ratio_p62   = ratio_p62,
-          ratio_p75   = ratio_p75,
-          ratio_p90   = ratio_p90,
-          model_level = model_level
-        )
-      }
     }
   }
 
@@ -816,266 +732,9 @@ if (!is.null(occ_edu_exp_ratios)) {
   write.csv(occ_edu_exp_ratios, output_file, row.names = FALSE)
   cat("Saved education-experience ratios to:", output_file, "\n")
 }
-cat("Fallback coefficient models (no area FE):", length(occ_area_models), "\n")
 cat("=============================================================\n\n")
 
 # Free ACS data — all information needed is now in ratios
 rm(acs_data_19_23)
 gc()
 
-# =============================================================================
-# SECTION 4: WAGE PREDICTION FUNCTION (INTERNAL)
-# =============================================================================
-#
-# Evaluates stored Mincer coefficients for a given education-experience
-# profile and returns four prevailing wage levels. Called internally by
-# lookup_prevailing_wage() — not intended for direct use.
-#
-# RATIO FORMULA:
-#   log_wage_hat = α + β₁·exp + β₂·exp² + β₃·exp³ + β₄·exp⁴ + γₖ·edₖ
-#   ratio_p50    = exp(log_wage_hat − log(raw_median))
-#   wage_p50     = oflc_level3 × ratio_p50
-#
-# The raw_median is the ACS occupation-wide weighted median wage (year-
-# invariant). The oflc_level3 is the year-specific OES anchor passed in
-# by the lookup function. The ratio adjusts that anchor for education and
-# experience.
-#
-# NOTE ON FIXEST COEFFICIENT NAMES:
-#   fixest double-wraps I() terms, so experience-squared appears as
-#   "I(I(Years_pot_experience^2))" in the coefficient vector. The exact
-#   strings below must match what coef() returns from fit_mincer().
-#
-# =============================================================================
-
-predict_wage <- function(model_entry, highest_ed, years_exp, oflc_level3) {
-
-  coefs <- model_entry$coefs
-
-  # Education dummy coefficient (Associates = 0, the reference category)
-  ed_coef <- case_when(
-    highest_ed == "Less than HS" ~ coefs["highest_edLess than HS"],
-    highest_ed == "High school"  ~ coefs["highest_edHigh school"],
-    highest_ed == "Some college" ~ coefs["highest_edSome college"],
-    highest_ed == "Bachelors"    ~ coefs["highest_edBachelors"],
-    highest_ed == "Masters"      ~ coefs["highest_edMasters"],
-    highest_ed == "Prof degree"  ~ coefs["highest_edProf degree"],
-    highest_ed == "PhD"          ~ coefs["highest_edPhD"],
-    TRUE ~ 0
-  )
-
-  log_wage_hat <-
-    coefs["(Intercept)"] +
-    coefs["Years_pot_experience"]         * years_exp +
-    coefs["I(I(Years_pot_experience^2))"] * years_exp^2 +
-    coefs["I(I(Years_pot_experience^3))"] * years_exp^3 +
-    coefs["I(I(Years_pot_experience^4))"] * years_exp^4 +
-    ed_coef
-
-  # Ratio of predicted wage at this profile to the occupation-wide ACS median
-  ratio_p50 <- exp(as.numeric(log_wage_hat) - log(model_entry$raw_median))
-
-  data.frame(
-    wage_p50 = oflc_level3 * ratio_p50,
-    wage_p62 = oflc_level3 * ratio_p50 * model_entry$ratio_p62,
-    wage_p75 = oflc_level3 * ratio_p50 * model_entry$ratio_p75,
-    wage_p90 = oflc_level3 * ratio_p50 * model_entry$ratio_p90
-  )
-}
-
-# =============================================================================
-# SECTION 5: PREVAILING WAGE LOOKUP FUNCTION
-# =============================================================================
-#
-# Main user-facing function. Returns four prevailing wage levels for a given
-# worker profile, wage type, and fiscal year.
-#
-# ARGUMENTS:
-#   soc_code   — OFLC SOC code with hyphen, e.g. "15-1252"
-#   area       — OFLC area code (numeric CBSA), e.g. "41860" = San Francisco
-#   highest_ed — one of: "Less than HS", "High school", "Some college",
-#                "Associates", "Bachelors", "Masters", "Prof degree", "PhD"
-#   years_exp  — years of potential experience (numeric, 0-45)
-#   wage_type  — "ALC" (standard, default) or "EDC" (ACWIA)
-#   year       — fiscal year as a string or number: 2021, 2022, 2023, or 2025
-#
-# RETURNS a one-row data frame with:
-#   wage_type, year, SocCode, ACS_OCCSOC, Area_requested, OES_geo_used,
-#   OES_median, highest_ed, years_exp,
-#   wage_p50, wage_p62, wage_p75, wage_p90,
-#   model_used
-#
-# HOW YEAR INTERACTS WITH THE MINCERS:
-#   The Mincer coefficients are the same regardless of year — only the
-#   OFLC Level 3 OES median changes. Specifying year = 2021 vs year = 2025
-#   will return different dollar amounts because the wage anchor differs,
-#   but the education-experience adjustment ratios are identical.
-#
-# =============================================================================
-
-lookup_prevailing_wage <- function(soc_code, area, highest_ed, years_exp,
-                                   wage_type = "ALC", year = 2025) {
-
-  # --- Input validation ---
-
-  valid_years <- as.numeric(names(oflc_bases[["ALC"]]))
-  year        <- as.numeric(year)
-
-  if (!wage_type %in% c("ALC", "EDC")) {
-    stop("wage_type must be 'ALC' (standard) or 'EDC' (ACWIA)")
-  }
-
-  if (!year %in% valid_years) {
-    stop("year must be one of: ", paste(valid_years, collapse = ", "),
-         ". Got: ", year)
-  }
-
-  valid_ed <- c("Less than HS", "High school", "Some college", "Associates",
-                "Bachelors", "Masters", "Prof degree", "PhD")
-  if (!highest_ed %in% valid_ed) {
-    stop("highest_ed must be one of: ", paste(valid_ed, collapse = ", "))
-  }
-
-  if (!is.numeric(years_exp) || years_exp < 0 || years_exp > 45) {
-    warning("years_exp should be between 0 and 45. Results outside this range ",
-            "may be unreliable.")
-  }
-
-  # --- Select the correct OFLC base table (wage type × year) ---
-  # oflc_bases is a nested list: oflc_bases[[wage_type]][[year]]
-  # This is the only place year enters the calculation.
-
-  oflc_base <- oflc_bases[[wage_type]][[as.character(year)]]
-
-  # Remove hyphen from SOC code to match ACS OCCSOC format
-  acs_occ <- gsub("-", "", soc_code)
-
-  # --- Look up OES Level 3 median wage for this area, occupation, and year ---
-
-  oflc_row      <- oflc_base %>% filter(SocCode == soc_code, Area == area)
-  oflc_geo_used <- area
-
-  # Fall back to national OES wage if no MSA-level entry exists
-  if (nrow(oflc_row) == 0 || is.na(oflc_row$Level3[1])) {
-    cat("Note: No MSA-level OES wage for", soc_code, "in area", area,
-        "(FY", year, wage_type, ")— falling back to national OES wage.\n")
-    oflc_row      <- oflc_base %>% filter(SocCode == soc_code, GeoLvl == "N")
-    oflc_geo_used <- "National (no MSA-level OES wage available)"
-  }
-
-  if (nrow(oflc_row) == 0 || is.na(oflc_row$Level3[1])) {
-    stop("No OES wage found for ", soc_code, " (FY", year, ", ", wage_type,
-         ") at any geography. Verify this SOC code exists in the OFLC export.")
-  }
-
-  level3 <- oflc_row$Level3[1]
-
-  # --- Look up education-experience ratios (NEW METHOD) ---
-  # First try to find ratios from national model with area FE.
-  # These ratios are area-invariant and indexed by (occupation, education, experience).
-
-  ratios_row <- NULL
-  if (!is.null(occ_edu_exp_ratios)) {
-    ratios_row <- occ_edu_exp_ratios %>%
-      filter(OCCSOC == acs_occ,
-             highest_ed == !!highest_ed,
-             Years_pot_experience == round(years_exp))
-
-    if (nrow(ratios_row) > 0) {
-      # Found ratios - apply directly
-      model_used <- ratios_row$model_level[1]
-      wages <- data.frame(
-        wage_p50 = level3 * ratios_row$ratio_p50[1],
-        wage_p62 = level3 * ratios_row$ratio_p62[1],
-        wage_p75 = level3 * ratios_row$ratio_p75[1],
-        wage_p90 = level3 * ratios_row$ratio_p90[1]
-      )
-    } else {
-      ratios_row <- NULL  # Mark as not found
-    }
-  }
-
-  # --- Fall back to old coefficient method if no ratios found ---
-  if (is.null(ratios_row)) {
-    model_key_national <- paste0(acs_occ, "__NATIONAL")
-
-    if (!is.null(occ_area_models[[model_key_national]])) {
-      model_entry <- occ_area_models[[model_key_national]]
-      model_used  <- paste0(
-        "Fallback to coefficient model (no area FE): ", model_entry$model_level
-      )
-
-      # Use old prediction method
-      wages <- predict_wage(
-        model_entry = model_entry,
-        highest_ed  = highest_ed,
-        years_exp   = years_exp,
-        oflc_level3 = level3
-      )
-    } else {
-      stop("No Mincer model or ratios found for ACS occupation ", acs_occ, ". ",
-           "Check that this occupation appears in the OFLC crosswalk and ACS data.")
-    }
-  }
-
-  # --- Return results ---
-
-  data.frame(
-    wage_type      = wage_type,
-    year           = year,
-    SocCode        = soc_code,
-    ACS_OCCSOC     = acs_occ,
-    Area_requested = area,
-    OES_geo_used   = oflc_geo_used,
-    OES_median     = level3,
-    highest_ed     = highest_ed,
-    years_exp      = years_exp,
-    wage_p50       = round(wages$wage_p50),
-    wage_p62       = round(wages$wage_p62),
-    wage_p75       = round(wages$wage_p75),
-    wage_p90       = round(wages$wage_p90),
-    model_used     = model_used
-  )
-}
-
-# =============================================================================
-# USAGE EXAMPLES (commented out - uncomment to test)
-# =============================================================================
-
-# Standard (ALC) prevailing wage, FY2023 — software developer in San Francisco,
-# master's degree, 5 years of experience
-# NOTE: Use SOC 2018 codes for FY2023+, SOC 2010 codes for FY2021-2022
-# lookup_prevailing_wage(
-#   soc_code   = "15-1252",
-#   area       = "41860",
-#   highest_ed = "Masters",
-#   years_exp  = 5,
-#   wage_type  = "ALC",
-#   year       = 2023
-# )
-
-# Same worker, ACWIA (EDC) wages, FY2023
-# lookup_prevailing_wage(
-#   soc_code   = "15-1252",
-#   area       = "41860",
-#   highest_ed = "Masters",
-#   years_exp  = 5,
-#   wage_type  = "EDC",
-#   year       = 2023
-# )
-
-# Compare the same worker across recent fiscal years (ALC only)
-# do.call(rbind, lapply(c(2023, 2025), function(yr) {
-#   lookup_prevailing_wage("17-2051", "41860", "Bachelors", 15,
-#                          wage_type = "ALC", year = yr)
-# }))
-
-# Compare ALC vs EDC for all years side by side
-# do.call(rbind, lapply(c(2021, 2022, 2023, 2025), function(yr) {
-#   rbind(
-#     lookup_prevailing_wage("13-2011", "41860", "Masters", 5,
-#                            wage_type = "ALC", year = yr),
-#     lookup_prevailing_wage("13-2011", "41860", "Masters", 5,
-#                            wage_type = "EDC", year = yr)
-#   )
-# }))
