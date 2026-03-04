@@ -728,13 +728,63 @@ if (!is.null(occ_edu_exp_ratios)) {
   cat("  (Average", round(n_edu_exp_combos / n_occs_with_ratios), "ratios per occupation)\n")
 
   # Save ratios to file for Script 05
-  output_file <- file.path(data_processed, "mincer_edu_exp_ratios.csv")
-  write.csv(occ_edu_exp_ratios, output_file, row.names = FALSE)
-  cat("Saved education-experience ratios to:", output_file, "\n")
+  # Use RDS for efficiency (much smaller and faster than CSV)
+  output_file_rds <- file.path(data_processed, "mincer_edu_exp_ratios.rds")
+  saveRDS(occ_edu_exp_ratios, output_file_rds)
+  cat("Saved education-experience ratios to:", output_file_rds, "\n")
+
+  # Also save as CSV for backwards compatibility and easy viewing
+  output_file_csv <- file.path(data_processed, "mincer_edu_exp_ratios.csv")
+  write.csv(occ_edu_exp_ratios, output_file_csv, row.names = FALSE)
+  cat("Also saved as CSV to:", output_file_csv, "\n")
 }
 cat("=============================================================\n\n")
+
+# =============================================================================
+# Save additional data files for interactive wage lookup
+# =============================================================================
+
+cat("Saving OFLC wage data for interactive lookup...\n")
+
+# Flatten oflc_bases nested list into a single dataframe for lookup function
+oflc_flat <- bind_rows(
+  bind_rows(oflc_bases$ALC, .id = "PW_year") %>% mutate(wage_type = "ALC"),
+  bind_rows(oflc_bases$EDC, .id = "PW_year") %>% mutate(wage_type = "EDC")
+) %>%
+  mutate(PW_year = as.integer(PW_year)) %>%
+  select(SOC_CODE_clean, MSA_code, PW_year, wage_type, Level3)
+
+oflc_bases_file <- file.path(data_processed, "oflc_bases.rds")
+saveRDS(oflc_flat, oflc_bases_file)
+cat("Saved OFLC bases to:", oflc_bases_file, "\n")
+cat("  Flattened to", nrow(oflc_flat), "rows for fast lookup\n")
+
+cat("Saving crosswalks for interactive lookup...\n")
+crosswalk_file <- file.path(data_processed, "crosswalks.rds")
+saveRDS(list(
+  crosswalk_2018 = acs_oflc_crosswalk,
+  fy2021_crosswalk = acs_oflc_crosswalk_2010
+), crosswalk_file)
+cat("Saved crosswalks to:", crosswalk_file, "\n\n")
 
 # Free ACS data — all information needed is now in ratios
 rm(acs_data_19_23)
 gc()
 
+# =============================================================================
+# Interactive Wage Lookup Function
+# =============================================================================
+#
+# For fast interactive wage queries, use the standalone script:
+#   source("lookup_wages.R")
+#
+# This loads pre-computed data in ~1-2 seconds (no model fitting needed)
+# and provides instant wage queries via get_prevailing_wages()
+#
+# =============================================================================
+
+cat("\n=============================================================================\n")
+cat("For interactive wage lookup, use:\n")
+cat("  source('lookup_wages.R')\n")
+cat("  result <- get_prevailing_wages(soc, education, experience, msa, year, type)\n")
+cat("=============================================================================\n\n")

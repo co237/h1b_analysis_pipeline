@@ -58,7 +58,10 @@ if (file.exists("config.R")) {
 
 # Check if prerequisites are available (either in memory or as files)
 # NEW METHODOLOGY: We need education-experience ratios (not coefficients)
-if (!exists("occ_edu_exp_ratios") && !file.exists(file.path(data_processed, "mincer_edu_exp_ratios.csv"))) {
+ratios_file_rds <- file.path(data_processed, "mincer_edu_exp_ratios.rds")
+ratios_file_csv <- file.path(data_processed, "mincer_edu_exp_ratios.csv")
+
+if (!exists("occ_edu_exp_ratios") && !file.exists(ratios_file_rds) && !file.exists(ratios_file_csv)) {
   cat("Mincer ratios not found in memory or file. Running Script 04 first...\n\n")
   # Save current working directory
   original_wd <- getwd()
@@ -79,7 +82,14 @@ if (!exists("occ_edu_exp_ratios") && !file.exists(file.path(data_processed, "min
 # Load ratios from file if not in memory
 if (!exists("occ_edu_exp_ratios") || is.null(occ_edu_exp_ratios)) {
   cat("Loading education-experience ratios from file...\n")
-  occ_edu_exp_ratios <- read.csv(file.path(data_processed, "mincer_edu_exp_ratios.csv"))
+  # Prefer RDS (much faster and smaller), fall back to CSV
+  if (file.exists(ratios_file_rds)) {
+    occ_edu_exp_ratios <- readRDS(ratios_file_rds)
+    cat("Loaded from RDS:", ratios_file_rds, "\n")
+  } else if (file.exists(ratios_file_csv)) {
+    occ_edu_exp_ratios <- read.csv(ratios_file_csv)
+    cat("Loaded from CSV:", ratios_file_csv, "\n")
+  }
   cat("Loaded ratios for", length(unique(occ_edu_exp_ratios$OCCSOC)), "occupations\n\n")
 }
 

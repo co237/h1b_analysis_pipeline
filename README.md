@@ -171,6 +171,44 @@ pw_level_IV_threshold  <- 88  # Proposed threshold for Level IV
 
 **Output:** Console summary with qualification rates and underpayment statistics by wage level
 
+## Interactive Wage Lookup
+
+After running Script 04, you can interactively query prevailing wages for specific scenarios using the `get_prevailing_wages()` function:
+
+```r
+# Load the function and data
+source("scripts/04 Calculate new prevailing wages.R")
+
+# Query a specific scenario
+result <- get_prevailing_wages(
+  soc_code = "15-1252",        # Software Developers
+  education = "Bachelors",      # Bachelor's degree
+  experience = 5,               # 5 years experience
+  msa_code = "41860",          # San Francisco MSA
+  year = 2023,                 # Fiscal year 2023
+  wage_type = "ALC"            # Standard (or "EDC" for ACWIA)
+)
+
+# Access results
+result$oflc_level3  # OFLC Level 3 wage (occupational median)
+result$pw_p50       # Mincer wage at 50th percentile
+result$pw_p62       # Mincer wage at 62nd percentile
+result$pw_p75       # Mincer wage at 75th percentile
+result$pw_p90       # Mincer wage at 90th percentile
+```
+
+**Parameters:**
+- `soc_code`: 6-digit SOC code (with or without hyphen, SOC 2010 or 2018)
+- `education`: "Less than HS", "High school", "Some college", "Associates", "Bachelors", "Masters", "Prof degree", "PhD"
+- `experience`: Years of experience (0-50)
+- `msa_code`: MSA/area code
+- `year`: Fiscal year (2021-2025)
+- `wage_type`: "ALC" (standard) or "EDC" (ACWIA)
+
+**Test Script:** Run `source("test_wage_lookup.R")` to see examples
+
+**Data Efficiency:** The function uses RDS format (74.6% smaller than CSV) for fast loading without relying on massive files
+
 ## Key Variables
 
 | Variable | Description |
