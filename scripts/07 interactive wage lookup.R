@@ -22,7 +22,7 @@
 # OCCUPATION (SOC Code) - 6-digit code with or without hyphen
 # Examples: "15-1252" (Software Developers), "17-2141" (Mechanical Engineers),
 #           "29-1141" (Registered Nurses), "13-2011" (Accountants)
-SOC_CODE <- "15-1252"
+SOC_CODE <- "17-2051"
 
 # EDUCATION LEVEL - Must be one of the following (keep quotes):
 #   "Less than HS", "High school", "Some college", "Associates",
@@ -30,7 +30,7 @@ SOC_CODE <- "15-1252"
 EDUCATION <- "Bachelors"
 
 # YEARS OF EXPERIENCE - Number between 0 and 50
-EXPERIENCE <- 5
+EXPERIENCE <- 15
 
 # AREA (MSA Code) - 5-digit metropolitan area code
 # Examples: "41860" (San Francisco), "35620" (New York City),
@@ -38,7 +38,7 @@ EXPERIENCE <- 5
 MSA_CODE <- "41860"
 
 # YEAR - Between 2021 and 2026
-YEAR <- 2023
+YEAR <- 2026
 
 # PREVAILING WAGE TYPE - Either "ALC" (standard) or "EDC" (ACWIA)
 WAGE_TYPE <- "ALC"

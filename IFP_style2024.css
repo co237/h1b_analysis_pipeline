@@ -1,0 +1,465 @@
+/* IFP Brand-Aligned Custom Style */
+/* Based on Institute for Progress Brand Guidelines (June 2024) */
+
+/* ============================================
+   FONT DECLARATIONS
+   ============================================ */
+
+/* Primary Brand Font: Söhne */
+@font-face {
+  font-family: 'Söhne';
+  src: url('Custom Fonts/Sohne/Söhne-Leicht.otf') format('opentype');
+  font-weight: 300;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Söhne';
+  src: url('Custom Fonts/Sohne/Söhne-LeichtKursiv.otf') format('opentype');
+  font-weight: 300;
+  font-style: italic;
+}
+
+@font-face {
+  font-family: 'Söhne';
+  src: url('Custom Fonts/Sohne/Söhne-Kräftig.otf') format('opentype');
+  font-weight: 700;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Söhne';
+  src: url('Custom Fonts/Sohne/Söhne-Extrafett.otf') format('opentype');
+  font-weight: 900;
+  font-style: normal;
+}
+
+/* Secondary Brand Font: Lora */
+@font-face {
+  font-family: 'Lora';
+  src: url('Custom Fonts/Lora/Lora-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Lora';
+  src: url('Custom Fonts/Lora/Lora-Italic.ttf') format('truetype');
+  font-weight: 400;
+  font-style: italic;
+}
+
+@font-face {
+  font-family: 'Lora';
+  src: url('Custom Fonts/Lora/Lora-Medium.ttf') format('truetype');
+  font-weight: 500;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Lora';
+  src: url('Custom Fonts/Lora/Lora-MediumItalic.ttf') format('truetype');
+  font-weight: 500;
+  font-style: italic;
+}
+
+@font-face {
+  font-family: 'Lora';
+  src: url('Custom Fonts/Lora/Lora-SemiBold.ttf') format('truetype');
+  font-weight: 600;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Lora';
+  src: url('Custom Fonts/Lora/Lora-SemiBoldItalic.ttf') format('truetype');
+  font-weight: 600;
+  font-style: italic;
+}
+
+@font-face {
+  font-family: 'Lora';
+  src: url('Custom Fonts/Lora/Lora-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Lora';
+  src: url('Custom Fonts/Lora/Lora-BoldItalic.ttf') format('truetype');
+  font-weight: 700;
+  font-style: italic;
+}
+
+/* ============================================
+   CSS CUSTOM PROPERTIES (COLOR PALETTE)
+   ============================================ */
+
+:root {
+  /* Primary Colors */
+  --ifp-off-white: #fcfbeb;
+  --ifp-purple: #b17ada;
+  --ifp-orange: #ff9762;
+  --ifp-rich-black: #373737;
+  
+  /* Category Colors */
+  --ifp-green: #39d794;          /* Biotechnology */
+  --ifp-red: #ff6565;            /* Metascience */
+  --ifp-light-blue: #41c4fc;     /* Emerging Technology */
+  --ifp-yellow: #fbdb36;         /* Energy */
+  --ifp-pink: #ff9ee3;           /* Infrastructure */
+  --ifp-dark-blue: #3368ce;      /* Immigration */
+  
+  /* Typography Settings (based on brand guidelines) */
+  --font-primary: 'Söhne', Arial, sans-serif;
+  --font-secondary: 'Lora', Georgia, serif;
+  
+  /* Font Weights */
+  --font-light: 300;
+  --font-bold: 700;
+  --font-extrabold: 900;
+  
+  /* Line Heights (based on guidelines) */
+  --line-height-tight: 1.0;      /* For headlines (32/32) */
+  --line-height-medium: 1.19;    /* For publication titles (26/31) */
+  --line-height-body: 1.6;       /* For body text (approx 14/22) */
+}
+
+/* ============================================
+   BASE STYLES
+   ============================================ */
+
+body {
+  font-family: var(--font-primary);
+  font-weight: var(--font-light);
+  background-color: var(--ifp-off-white);
+  color: var(--ifp-rich-black);
+  line-height: var(--line-height-body);
+  font-size: 14px;
+}
+
+/* ============================================
+   TYPOGRAPHY HIERARCHY
+   Per Brand Guidelines pg. 14-15
+   ============================================ */
+
+/* Page Titles / Headlines - Söhne Extrafett */
+h1,
+.page-title,
+.headline {
+  font-family: var(--font-primary);
+  font-weight: var(--font-extrabold);
+  color: var(--ifp-rich-black);
+  font-size: 32px;
+  line-height: var(--line-height-tight);
+  letter-spacing: -0.02em;
+}
+
+/* Publication Titles - Lora Regular */
+h2,
+.publication-title {
+  font-family: var(--font-secondary);
+  font-weight: 400;
+  color: var(--ifp-rich-black);
+  font-size: 26px;
+  line-height: var(--line-height-medium);
+}
+
+/* Subheadings - Söhne Kräftig */
+h3,
+.subheading {
+  font-family: var(--font-primary);
+  font-weight: var(--font-bold);
+  color: var(--ifp-rich-black);
+  font-size: 18px;
+  line-height: 1.4;
+}
+
+/* Category Tags - Söhne Extrafett (small) */
+.category-tag {
+  font-family: var(--font-primary);
+  font-weight: var(--font-extrabold);
+  font-size: 9px;
+  line-height: 1.0;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Body Text - Söhne Leicht */
+p,
+body,
+.body-text {
+  font-family: var(--font-primary);
+  font-weight: var(--font-light);
+  font-size: 14px;
+  line-height: var(--line-height-body);
+}
+
+/* Bold Body Text - Söhne Kräftig */
+strong,
+b {
+  font-weight: var(--font-bold);
+}
+
+/* ============================================
+   COLOR USAGE
+   Per Brand Guidelines pg. 9
+   ============================================ */
+
+/* On off-white backgrounds, use rich black and/or one other color */
+.content-section {
+  background-color: var(--ifp-off-white);
+  color: var(--ifp-rich-black);
+}
+
+/* On colored backgrounds, use off-white text */
+.colored-background {
+  color: var(--ifp-off-white);
+}
+
+.bg-purple { background-color: var(--ifp-purple); }
+.bg-orange { background-color: var(--ifp-orange); }
+.bg-green { background-color: var(--ifp-green); }
+.bg-red { background-color: var(--ifp-red); }
+.bg-light-blue { background-color: var(--ifp-light-blue); }
+.bg-yellow { background-color: var(--ifp-yellow); }
+.bg-pink { background-color: var(--ifp-pink); }
+.bg-dark-blue { background-color: var(--ifp-dark-blue); }
+
+/* Text color utilities */
+.text-purple { color: var(--ifp-purple); }
+.text-orange { color: var(--ifp-orange); }
+.text-green { color: var(--ifp-green); }
+.text-red { color: var(--ifp-red); }
+.text-light-blue { color: var(--ifp-light-blue); }
+.text-yellow { color: var(--ifp-yellow); }
+.text-pink { color: var(--ifp-pink); }
+.text-dark-blue { color: var(--ifp-dark-blue); }
+
+/* ============================================
+   CATEGORY-SPECIFIC STYLES
+   ============================================ */
+
+.category-biotechnology { color: var(--ifp-green); }
+.category-metascience { color: var(--ifp-red); }
+.category-emerging-tech { color: var(--ifp-light-blue); }
+.category-energy { color: var(--ifp-yellow); }
+.category-infrastructure { color: var(--ifp-pink); }
+.category-immigration { color: var(--ifp-dark-blue); }
+
+/* ============================================
+   LINKS
+   ============================================ */
+
+a {
+  color: var(--ifp-light-blue);
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+a:hover {
+  color: var(--ifp-purple);
+  text-decoration: underline;
+}
+
+/* ============================================
+   BUTTONS
+   ============================================ */
+
+button,
+.btn {
+  font-family: var(--font-primary);
+  font-weight: var(--font-bold);
+  background-color: var(--ifp-purple);
+  color: var(--ifp-off-white);
+  border: none;
+  padding: 10px 20px;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 14px;
+  transition: background-color 0.2s ease;
+}
+
+button:hover,
+.btn:hover {
+  background-color: var(--ifp-orange);
+}
+
+.btn-primary {
+  background-color: var(--ifp-purple);
+}
+
+.btn-secondary {
+  background-color: var(--ifp-orange);
+}
+
+.btn-primary:hover {
+  background-color: var(--ifp-orange);
+}
+
+.btn-secondary:hover {
+  background-color: var(--ifp-purple);
+}
+
+/* ============================================
+   TABLES
+   ============================================ */
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  background-color: var(--ifp-off-white);
+  font-family: var(--font-primary);
+  font-weight: var(--font-light);
+  font-size: 14px;
+}
+
+th {
+  font-family: var(--font-primary);
+  font-weight: var(--font-bold);
+  background-color: var(--ifp-rich-black);
+  color: var(--ifp-off-white);
+  padding: 12px 10px;
+  text-align: left;
+}
+
+td {
+  border: 1px solid #dddddd;
+  padding: 10px;
+  color: var(--ifp-rich-black);
+}
+
+/* Striped rows using brand colors */
+tr.striped-row:nth-child(even),
+tbody tr:nth-child(even) {
+  background-color: rgba(177, 122, 218, 0.1); /* Light purple tint */
+}
+
+tr.striped-row:nth-child(odd),
+tbody tr:nth-child(odd) {
+  background-color: var(--ifp-off-white);
+}
+
+/* ============================================
+   HIGHLIGHT SECTIONS
+   ============================================ */
+
+.highlight {
+  background-color: var(--ifp-yellow);
+  color: var(--ifp-rich-black);
+  padding: 15px 20px;
+  border-radius: 5px;
+  border-left: 4px solid var(--ifp-orange);
+}
+
+.callout {
+  background-color: var(--ifp-purple);
+  color: var(--ifp-off-white);
+  padding: 20px;
+  border-radius: 5px;
+}
+
+/* ============================================
+   WAVE PATTERN UTILITIES
+   Per Brand Guidelines pg. 11-12
+   ============================================ */
+
+.wave-pattern-container {
+  position: relative;
+  overflow: hidden;
+}
+
+.wave-pattern {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.3; /* 20-50% opacity per guidelines */
+  pointer-events: none;
+}
+
+.wave-pattern-overlay {
+  position: relative;
+  z-index: 1;
+}
+
+/* ============================================
+   SPACING & LAYOUT
+   Per Brand Guidelines pg. 15
+   ============================================ */
+
+/* Paragraph spacing should equal 125% of font size */
+p {
+  margin-bottom: 17.5px; /* 14px * 1.25 */
+}
+
+h1, h2, h3, h4, h5, h6 {
+  margin-bottom: 20px;
+}
+
+/* ============================================
+   UTILITY CLASSES
+   ============================================ */
+
+.text-center { text-align: center; }
+.text-left { text-align: left; }
+.text-right { text-align: right; }
+
+.fw-light { font-weight: var(--font-light); }
+.fw-bold { font-weight: var(--font-bold); }
+.fw-extrabold { font-weight: var(--font-extrabold); }
+
+.font-sohne { font-family: var(--font-primary); }
+.font-lora { font-family: var(--font-secondary); }
+
+/* ============================================
+   RESPONSIVE ADJUSTMENTS
+   ============================================ */
+
+@media (max-width: 768px) {
+  h1, .headline {
+    font-size: 24px;
+  }
+  
+  h2, .publication-title {
+    font-size: 20px;
+  }
+  
+  body, p {
+    font-size: 13px;
+  }
+}
+
+/* ============================================
+   ACCESSIBILITY
+   ============================================ */
+
+/* Ensure sufficient contrast ratios */
+.bg-yellow,
+.bg-light-blue {
+  color: var(--ifp-rich-black);
+}
+
+/* Focus states for keyboard navigation */
+a:focus,
+button:focus,
+.btn:focus {
+  outline: 2px solid var(--ifp-purple);
+  outline-offset: 2px;
+}
+
+/* ============================================
+   PRINT STYLES
+   ============================================ */
+
+@media print {
+  body {
+    background-color: white;
+    color: black;
+  }
+  
+  .wave-pattern {
+    display: none;
+  }
+}
