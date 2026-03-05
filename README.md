@@ -57,21 +57,30 @@ h1b_analysis_pipeline/
 ├── DATA_SOURCES.md                 # Data download instructions
 ├── config.R                        # Central configuration
 ├── run_all.R                       # Master execution script
+├── lookup_wages.R                  # Fast wage lookup function
 │
-├── scripts/                        # Analysis scripts (run in order 01-06)
+├── scripts/                        # Analysis scripts (run in order 01-07)
 │   ├── 01_data_cleaning.R          # Clean and merge FOIA + LCA data
 │   ├── 02_geocode_to_pumas.R       # Map ZIP codes to Census PUMAs
 │   ├── 03 interpolate wage percentiles.R  # Calculate petition percentiles
 │   ├── 04 Calculate new prevailing wages.R # Estimate Mincer models
 │   ├── 05 Apply new PWs to H1B petitions.R # Apply wages to petitions
-│   └── 06 nprm_simulation.R        # Simulate NPRM policy effects
+│   ├── 06 nprm_simulation.R        # Simulate NPRM policy effects
+│   └── 07 interactive wage lookup.R # User-friendly wage calculator
 │
-├── data/
-│   ├── raw/                        # Source data (not in git, ~10 GB)
-│   ├── intermediate/               # Intermediate outputs
-│   └── processed/                  # Final processed datasets
+├── docs/
+│   └── data_directories/           # Documentation for data folders
+│       ├── RAW_DATA.md             # What's in data/raw/
+│       ├── INTERMEDIATE_DATA.md    # What's in data/intermediate/
+│       ├── PROCESSED_DATA.md       # What's in data/processed/
+│       └── README.md               # Data directory overview
 │
-└── output/
+├── data/                           # Symlinked to Google Drive
+│   ├── raw/                        # Source data (~7 GB)
+│   ├── intermediate/               # Intermediate outputs (~658 MB)
+│   └── processed/                  # Final processed datasets (~350 MB)
+│
+└── output/                         # Symlinked to Google Drive
     ├── figures/                    # Generated charts
     └── tables/                     # Summary tables and exports
 ```
@@ -81,7 +90,9 @@ h1b_analysis_pipeline/
 ### Step 1: Data Cleaning (Script 01)
 **Runtime:** ~20-30 minutes
 
-Merges FOIA petition data with LCA applications to obtain occupation codes and wage levels. Standardizes all occupation codes to SOC 2018 using a two-stage crosswalk for FY2021-2022 data (SOC 2010 → SOC 2018 → ACS 2018).
+Merges FOIA petition data with LCA applications to obtain occupation codes and wage levels. Standardizes all occupation codes using crosswalks:
+- **FY2023+**: Direct SOC 2018 → ACS 2018 mapping
+- **FY2021-2022**: Two-stage SOC 2010 → SOC 2018 → ACS 2018 mapping
 
 **Input:**
 - H-1B FOIA petition files (FY 2021-2024)
@@ -171,13 +182,56 @@ pw_level_IV_threshold  <- 88  # Proposed threshold for Level IV
 
 **Output:** Console summary with qualification rates and underpayment statistics by wage level
 
+### Step 7: Interactive Wage Lookup (Script 07)
+**Runtime:** ~2 seconds (after Script 04 has run)
+
+User-friendly calculator for Experience Benchmarking prevailing wages. Simply edit parameters at the top of the script and run.
+
+**How to Use:**
+1. Open `scripts/07 interactive wage lookup.R` in RStudio
+2. Edit the USER INPUTS section (lines 26-44):
+   ```r
+   SOC_CODE <- "15-1252"      # Occupation
+   EDUCATION <- "Bachelors"   # Education level
+   EXPERIENCE <- 5            # Years of experience
+   MSA_CODE <- "41860"        # San Francisco
+   YEAR <- 2023               # Fiscal year
+   WAGE_TYPE <- "ALC"         # Standard or "EDC" for ACWIA
+   ```
+3. Run the entire script (Ctrl/Cmd + Shift + Enter)
+
+**Output:** Formatted display showing:
+- Occupational median (OFLC Level 3)
+- Four Experience Benchmarking wage levels (50th, 62nd, 75th, 90th percentiles)
+- Education-experience adjustment ratio
+- Comparison to typical worker (e.g., "earns 21.4% less than typical worker")
+- Percentile scaling factors
+
+**For Programmatic Use:** Use `lookup_wages.R` directly (see next section)
+
 ## Interactive Wage Lookup
 
-After running Script 04, you can interactively query prevailing wages for specific scenarios using the `get_prevailing_wages()` function:
+Two ways to query Experience Benchmarking prevailing wages:
+
+### Option 1: User-Friendly Script (Script 07)
+
+Best for **occasional lookups** in RStudio:
 
 ```r
-# Load the function and data
-source("scripts/04 Calculate new prevailing wages.R")
+# Open scripts/07 interactive wage lookup.R
+# Edit parameters at top, then run script
+# Get formatted output with explanations
+```
+
+See [Step 7](#step-7-interactive-wage-lookup-script-07) above for details.
+
+### Option 2: Programmatic Function (lookup_wages.R)
+
+Best for **batch queries** or **integration** into other code:
+
+```r
+# Load the function and data (fast - ~2 seconds)
+source("lookup_wages.R")
 
 # Query a specific scenario
 result <- get_prevailing_wages(
@@ -190,6 +244,7 @@ result <- get_prevailing_wages(
 )
 
 # Access results
+result$status       # "success" or "error"
 result$oflc_level3  # OFLC Level 3 wage (occupational median)
 result$pw_p50       # Mincer wage at 50th percentile
 result$pw_p62       # Mincer wage at 62nd percentile
@@ -202,12 +257,10 @@ result$pw_p90       # Mincer wage at 90th percentile
 - `education`: "Less than HS", "High school", "Some college", "Associates", "Bachelors", "Masters", "Prof degree", "PhD"
 - `experience`: Years of experience (0-50)
 - `msa_code`: MSA/area code
-- `year`: Fiscal year (2021-2025)
+- `year`: Fiscal year (2021-2026)
 - `wage_type`: "ALC" (standard) or "EDC" (ACWIA)
 
-**Test Script:** Run `source("test_wage_lookup.R")` to see examples
-
-**Data Efficiency:** The function uses RDS format (74.6% smaller than CSV) for fast loading without relying on massive files
+**Data Efficiency:** Uses RDS format (instant loading, no massive CSV files required)
 
 ## Key Variables
 
@@ -258,11 +311,14 @@ log(wage) = α + β₁·exp + β₂·exp² + β₃·exp³ + β₄·exp⁴ + Σγ
 
 **Solution:** Two-stage crosswalk system:
 1. **FY2023+ → ACS:** Direct mapping using `occupation_oflc_to_acs_crowsswalk.csv`
-2. **FY2021-2022 → ACS:** Three-stage mapping (SOC 2010 → SOC 2018 → ACS 2018) using `fy2021_oflc_to_acs_crosswalk.csv`
+2. **FY2021-2022 → ACS:** Two-stage mapping (SOC 2010 → SOC 2018 → ACS 2018)
+   - Uses official Census SOC 2010-to-2018 crosswalk
+   - Then maps to ACS 2018 using existing crosswalk
+   - Includes manual mappings for consolidated IT occupations
 
 **Coverage:**
-- FY2023+ crosswalk: 100% coverage
-- FY2021-2022 crosswalk: 87.6% coverage (383,227 / 437,593 OFLC wage entries)
+- FY2023+ crosswalk: 100% coverage (848 SOC 2018 codes)
+- FY2021-2022 crosswalk: 100% coverage (892 SOC 2010 codes, improved from previous 87.6%)
 
 ### Geographic Handling
 
@@ -333,9 +389,10 @@ Some petitions (~23.5%) don't receive Mincer wages due to:
 
 The vast majority of missing wages are due to missing education codes in the petition data, not failures in the matching logic.
 
-### Crosswalk Coverage Gaps
-- FY2021-2022: 12.4% of OFLC codes couldn't be mapped to ACS 2018
-- Affected petitions use petition-reported SOC codes when LCA merge fails
+### Crosswalk Coverage
+- **Current (two-stage)**: 100% coverage for both FY2021-2022 and FY2023+
+- All OFLC SOC codes successfully map to ACS occupation codes
+- Previous approach had 87.6% coverage; new two-stage crosswalk achieves 100%
 
 ### PUMA Geocoding Gaps
 ~5-10% of petitions may not match to PUMAs if:

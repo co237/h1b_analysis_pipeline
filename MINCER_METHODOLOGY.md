@@ -199,9 +199,9 @@ SOC 2010     →  SOC 2018     →  ACS 2018     Final Result
 15-1131          15-1251          15-1251      Computer Programmers (exact)
 ```
 
-**Coverage:** 87.6% of FY2021-2022 OFLC wage entries (383,227 / 437,593)
+**Coverage:** 100% of FY2021-2022 OFLC wage entries (all 892 SOC 2010 codes mapped)
 
-**Gap:** 12.4% of OFLC codes couldn't be mapped. Petitions with unmapped codes use petition-reported SOC codes when available.
+**Improvement:** Previous three-stage approach had 87.6% coverage (383,227 / 437,593 entries). New two-stage approach using official Census crosswalk achieves 100% coverage.
 
 ### Critical Fix: Wildcard Normalization
 
@@ -533,7 +533,7 @@ h1b_22_24 <- h1b_22_24 %>%
 **Why some petitions get NA despite complete data:**
 1. OFLC doesn't publish wages for that occupation-area-year
 2. Occupation has <100 workers in ACS (no reliable model)
-3. Crosswalk gaps (12.4% of FY2021-2022 codes unmapped)
+3. (Previous issue: Crosswalk gaps - now resolved with 100% coverage)
 
 ---
 
@@ -600,9 +600,9 @@ h1b_22_24 <- h1b_22_24 %>%
 
 **Choice:** SOC 2010 → SOC 2018 → ACS 2018 (two stages)
 
-**Rationale:** Using Census's official crosswalks ensures we follow standard mappings. Direct SOC 2010 → ACS 2018 would require extensive manual matching.
+**Rationale:** Using Census's official SOC 2010-to-2018 crosswalk ensures we follow standard mappings and achieves 100% coverage. Direct SOC 2010 → ACS 2018 would require extensive manual matching.
 
-**Trade-off:** 12.4% of codes couldn't be mapped, but this is unavoidable due to classification system changes.
+**Result:** 100% of SOC 2010 codes successfully mapped (improved from previous 87.6% with three-stage approach). Includes manual mappings for consolidated IT occupations (15-1132, 15-1133 → 15-1252, etc.).
 
 ### Decision 4: Median Aggregation for Multiple SOC → Same ACS
 
