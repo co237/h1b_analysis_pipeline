@@ -117,13 +117,19 @@ cat(sprintf("Mean wage premium: %.1f%%\n", overall_stats$mean_premium))
 
 # Create summary text plot
 p1 <- ggplot() +
-  annotate("text", x = 0.5, y = 0.7,
+  annotate("text", x = 0.5, y = 0.85,
+           label = "H-1B Petitions with Valid Experience Benchmarking Wages",
+           size = 7, fontface = "bold", color = ifp_colors$rich_black) +
+  annotate("text", x = 0.5, y = 0.75,
+           label = sprintf("(FY 2021-2023, n = %s)", format(overall_stats$total_petitions, big.mark = ",")),
+           size = 5, color = ifp_colors$rich_black) +
+  annotate("text", x = 0.5, y = 0.55,
            label = sprintf("%.1f%%", overall_stats$pct_underpaid),
            size = 24, fontface = "bold", color = ifp_colors$dark_blue) +
-  annotate("text", x = 0.5, y = 0.5,
-           label = "of H-1B petitions pay below\nthe 50th percentile",
+  annotate("text", x = 0.5, y = 0.35,
+           label = "of petitions pay below\nthe 50th percentile prevailing wage",
            size = 6, color = ifp_colors$rich_black) +
-  annotate("text", x = 0.5, y = 0.2,
+  annotate("text", x = 0.5, y = 0.15,
            label = sprintf("Median wage premium: %.1f%%", overall_stats$median_premium),
            size = 5, color = ifp_colors$rich_black, fontface = "italic") +
   xlim(0, 1) + ylim(0, 1) +
@@ -151,7 +157,8 @@ p2 <- ggplot(h1b_sample, aes(x = petition_annual_pay_clean, y = wage_premium_pct
   scale_y_continuous(labels = label_percent(scale = 1),
                      limits = c(-100, 200)) +
   labs(
-    title = "Salary vs Wage Premium Relative to 50th Percentile",
+    title = "Eligible Population: Salary vs Wage Premium",
+    subtitle = "Relative to 50th percentile prevailing wage",
     x = "Annual Salary",
     y = "Wage Premium (%)"
   ) +
@@ -192,7 +199,7 @@ p3 <- ggplot(underpayment_by_cohort, aes(x = age_cohort, y = pct_underpaid)) +
   scale_y_continuous(labels = label_percent(scale = 1),
                      expand = expansion(mult = c(0, 0.1))) +
   labs(
-    title = "Underpayment Rates by Age Cohort",
+    title = "Eligible Population: Underpayment Rates by Age Cohort",
     subtitle = "Percentage of petitions paying below 50th percentile",
     x = "Age Cohort",
     y = "Underpaid (%)"
@@ -224,7 +231,7 @@ p4 <- ggplot(underpayment_by_age, aes(x = age_group_5yr, y = pct_underpaid)) +
   scale_y_continuous(labels = label_percent(scale = 1),
                      expand = expansion(mult = c(0, 0.1))) +
   labs(
-    title = "Underpayment by 5-Year Age Group",
+    title = "Eligible Population: Underpayment by 5-Year Age Group",
     subtitle = "Percentage of petitions paying below 50th percentile",
     x = "Age Group",
     y = "Underpaid (%)"
@@ -257,7 +264,7 @@ p5 <- ggplot(premium_by_age, aes(x = age_group_5yr, y = median_premium)) +
             size = 3.5, color = ifp_colors$rich_black) +
   scale_y_continuous(labels = label_percent(scale = 1)) +
   labs(
-    title = "Median Wage Premium by 5-Year Age Group",
+    title = "Eligible Population: Median Wage Premium by 5-Year Age Group",
     subtitle = "Percent above/below 50th percentile prevailing wage",
     x = "Age Group",
     y = "Median Premium (%)"
@@ -333,7 +340,7 @@ p6 <- ggplot(policy_stats, aes(x = policy, y = pct_underpaid)) +
   scale_y_continuous(labels = label_percent(scale = 1),
                      expand = expansion(mult = c(0, 0.15))) +
   labs(
-    title = "Underpayment Rates by Policy",
+    title = "Eligible Population: Underpayment Rates by Policy",
     subtitle = "Percentage of eligible petitions paying below 50th percentile",
     x = NULL,
     y = "Underpaid Among Eligible (%)"
@@ -388,34 +395,41 @@ policy_table_data <- tibble(
   )
 ) %>%
   mutate(
-    `% Ineligible` = sprintf("%.1f%%", (ineligible_n / total_n) * 100),
-    `False Negatives` = sprintf("%.1f%%", (eligible_underpaid_n / total_underpaid) * 100),
-    `False Positives` = sprintf("%.1f%%", (ineligible_positive_n / total_positive_premium) * 100)
+    `% Ineligible\n(Fail to Meet\nPolicy Threshold)` = sprintf("%.1f%%", (ineligible_n / total_n) * 100),
+    `% False Negatives\n(Eligible but Pay\n< 50th Percentile)` = sprintf("%.1f%%", (eligible_underpaid_n / total_underpaid) * 100),
+    `% False Positives\n(Excluded but Would\nPay ≥ 50th Percentile)` = sprintf("%.1f%%", (ineligible_positive_n / total_positive_premium) * 100)
   ) %>%
-  select(Policy, `% Ineligible`, `False Negatives`, `False Positives`)
+  select(Policy, `% Ineligible\n(Fail to Meet\nPolicy Threshold)`,
+         `% False Negatives\n(Eligible but Pay\n< 50th Percentile)`,
+         `% False Positives\n(Excluded but Would\nPay ≥ 50th Percentile)`)
 
 print(policy_table_data)
 
-# Create table as a ggplot object for PDF
+# Create table as a ggplot object for PDF with better styling
 table_grob <- tableGrob(policy_table_data, rows = NULL,
                         theme = ttheme_minimal(
                           core = list(
-                            fg_params = list(hjust = 0, x = 0.1, fontsize = 10),
+                            fg_params = list(hjust = 0.5, x = 0.5, fontsize = 10),
                             bg_params = list(fill = ifp_colors$off_white)
                           ),
                           colhead = list(
-                            fg_params = list(fontface = "bold", fontsize = 11),
-                            bg_params = list(fill = ifp_colors$rich_black, col = ifp_colors$off_white)
+                            fg_params = list(fontface = "bold", fontsize = 9, col = ifp_colors$off_white),
+                            bg_params = list(fill = ifp_colors$dark_blue)
                           )
                         ))
 
 p7 <- ggplot() +
   annotation_custom(table_grob) +
-  labs(title = "Policy Comparison Summary") +
+  labs(
+    title = "Eligible Population: Policy Comparison Summary",
+    subtitle = "All percentages are shares of their respective totals\n(% Ineligible: of all petitions | False Negatives: of all underpaid | False Positives: of all positive premium)"
+  ) +
   theme_void() +
   theme(
     plot.title = element_text(size = 16, face = "bold", hjust = 0.5,
-                              color = ifp_colors$rich_black, margin = margin(b = 10)),
+                              color = ifp_colors$rich_black, margin = margin(b = 5)),
+    plot.subtitle = element_text(size = 9, hjust = 0.5,
+                                 color = ifp_colors$rich_black, margin = margin(b = 15)),
     plot.background = element_rect(fill = ifp_colors$off_white, color = NA)
   )
 
@@ -457,7 +471,7 @@ p8 <- ggplot(median_underpay_dollars, aes(x = Policy, y = median_underpay)) +
   scale_y_continuous(labels = dollar_format(),
                      expand = expansion(mult = c(0.1, 0.05))) +
   labs(
-    title = "Median Underpayment Among Underpaid Workers by Policy",
+    title = "Eligible Population: Median Underpayment Among Underpaid Workers",
     subtitle = "Dollar amount below 50th percentile (negative values)",
     x = NULL,
     y = "Median Underpayment ($)"
@@ -506,7 +520,7 @@ p9 <- ggplot(median_underpay_pct, aes(x = Policy, y = median_underpay_pct)) +
   scale_y_continuous(labels = label_percent(scale = 1),
                      expand = expansion(mult = c(0, 0.15))) +
   labs(
-    title = "Median Underpayment Among Underpaid Workers by Policy",
+    title = "Eligible Population: Median Underpayment Among Underpaid Workers",
     subtitle = "Percent below 50th percentile (positive values)",
     x = NULL,
     y = "Median Underpayment (%)"
@@ -555,7 +569,7 @@ p10 <- ggplot(median_premium_dollars, aes(x = Policy, y = median_premium)) +
             size = 4, color = ifp_colors$rich_black) +
   scale_y_continuous(labels = dollar_format()) +
   labs(
-    title = "Median Wage Premium Among Eligible Workers by Policy",
+    title = "Eligible Population: Median Wage Premium Among Eligible Workers",
     subtitle = "Dollar amount above/below 50th percentile",
     x = NULL,
     y = "Median Wage Premium ($)"
@@ -608,7 +622,7 @@ p11 <- ggplot(median_premium_pct, aes(x = Policy, y = median_premium_pct)) +
             size = 4, color = ifp_colors$rich_black) +
   scale_y_continuous(labels = label_percent(scale = 1)) +
   labs(
-    title = "Median Wage Premium Among Eligible Workers by Policy",
+    title = "Eligible Population: Median Wage Premium Among Eligible Workers",
     subtitle = "Percent above/below 50th percentile",
     x = NULL,
     y = "Median Wage Premium (%)"
@@ -665,7 +679,7 @@ p12 <- ggplot(salary_by_year_median, aes(x = year, y = median_salary, color = po
   scale_y_continuous(labels = dollar_format(scale = 1/1000, suffix = "K")) +
   scale_x_continuous(breaks = 2021:2023) +
   labs(
-    title = "Median Salary of Eligible Workers by Year",
+    title = "Eligible Population: Median Salary by Year",
     subtitle = "Comparing policy proposals across fiscal years",
     x = "Fiscal Year",
     y = "Median Salary",
@@ -723,7 +737,7 @@ p13 <- ggplot(salary_by_year_mean, aes(x = year, y = mean_salary, color = policy
   scale_y_continuous(labels = dollar_format(scale = 1/1000, suffix = "K")) +
   scale_x_continuous(breaks = 2021:2023) +
   labs(
-    title = "Mean Salary of Eligible Workers by Year",
+    title = "Eligible Population: Mean Salary by Year",
     subtitle = "Comparing policy proposals across fiscal years",
     x = "Fiscal Year",
     y = "Mean Salary",
@@ -790,7 +804,7 @@ p14 <- ggplot(age_stats_by_policy, aes(x = age)) +
   facet_wrap(~policy, ncol = 2, scales = "free_y") +
   scale_x_continuous(limits = c(20, 60), breaks = seq(20, 60, 10)) +
   labs(
-    title = "Age Distribution of Eligible Workers by Policy",
+    title = "Eligible Population: Age Distribution by Policy",
     subtitle = "Solid line = median, dashed lines = 25th and 75th percentiles",
     x = "Age",
     y = "Count"
@@ -799,22 +813,72 @@ p14 <- ggplot(age_stats_by_policy, aes(x = age)) +
   theme(strip.text = element_text(face = "bold", size = 10))
 
 ################################################################################
-# ANALYSIS 15: Weighted Lottery Simulation - Assign Weights
+# ANALYSIS 15: Eligible Population - Share with PhD by Policy
 ################################################################################
 
-cat("\n=== Analysis 15: Weighted Lottery Simulation ===\n")
+cat("\n=== Analysis 15: Eligible Population PhD Share ===\n")
+
+# Calculate share of PhD holders among eligible workers for each policy
+eligible_phd_stats <- h1b_policy %>%
+  mutate(has_phd = highest_ed == "PhD") %>%
+  summarise(
+    Status_Quo_total = sum(eligible_status_quo, na.rm = TRUE),
+    Status_Quo_phd = sum(eligible_status_quo & has_phd, na.rm = TRUE),
+
+    Rule_2021_total = sum(eligible_2021, na.rm = TRUE),
+    Rule_2021_phd = sum(eligible_2021 & has_phd, na.rm = TRUE),
+
+    P50_total = sum(eligible_p50, na.rm = TRUE),
+    P50_phd = sum(eligible_p50 & has_phd, na.rm = TRUE),
+
+    EB_total = sum(eligible_eb, na.rm = TRUE),
+    EB_phd = sum(eligible_eb & has_phd, na.rm = TRUE)
+  ) %>%
+  pivot_longer(everything(), names_to = c("policy", ".value"), names_pattern = "(.*)_(.*)") %>%
+  mutate(
+    pct_phd = (phd / total) * 100,
+    policy = factor(case_when(
+      policy == "Status_Quo" ~ "Status Quo",
+      policy == "Rule_2021" ~ "2021 Rule",
+      policy == "P50" ~ "50th Percentile Minimum",
+      policy == "EB" ~ "Experience Benchmarking"
+    ), levels = c("Status Quo", "2021 Rule", "50th Percentile Minimum", "Experience Benchmarking"))
+  )
+
+print(eligible_phd_stats)
+
+p15 <- ggplot(eligible_phd_stats, aes(x = policy, y = pct_phd)) +
+  geom_col(fill = ifp_colors$dark_blue) +
+  geom_text(aes(label = sprintf("%.1f%%", pct_phd)),
+            vjust = -0.5, size = 4, color = ifp_colors$rich_black) +
+  scale_y_continuous(labels = label_percent(scale = 1),
+                     expand = expansion(mult = c(0, 0.15))) +
+  labs(
+    title = "Eligible Population: Share with PhD by Policy",
+    subtitle = "Percentage of eligible workers with doctoral degrees",
+    x = NULL,
+    y = "Share with PhD (%)"
+  ) +
+  theme_ifp() +
+  theme(axis.text.x = element_text(angle = 20, hjust = 1))
+
+################################################################################
+# ANALYSIS 16: Weighted Lottery Simulation - Assign Weights
+################################################################################
+
+cat("\n=== Analysis 16: Weighted Lottery Simulation ===\n")
 
 # Assign lottery weights based on each policy's criteria
 h1b_lottery <- h1b_policy %>%
   filter(!is.na(PW_year), !is.na(age)) %>%
   mutate(
-    # Status Quo: Weights based on OFLC Level thresholds
+    # Status Quo: Weights based on OFLC Level thresholds (using _full for annual wages)
     weight_status_quo = case_when(
       !eligible_status_quo ~ 0,  # Ineligible = 0 weight
-      petition_annual_pay_clean >= Level4 ~ 4,
-      petition_annual_pay_clean >= Level3 ~ 3,
-      petition_annual_pay_clean >= Level2 ~ 2,
-      petition_annual_pay_clean >= Level1 ~ 1,
+      petition_annual_pay_clean >= Level4_full ~ 4,
+      petition_annual_pay_clean >= Level3_full ~ 3,
+      petition_annual_pay_clean >= Level2_full ~ 2,
+      petition_annual_pay_clean >= Level1_full ~ 1,
       TRUE ~ 1  # Below Level1 gets 1 entry
     ),
 
@@ -856,10 +920,10 @@ cat("Weight distribution:\n")
 print(weight_summary)
 
 ################################################################################
-# ANALYSIS 16: Weighted Lottery - Median/Mean Salary by Year
+# ANALYSIS 17: Weighted Lottery - Median/Mean Salary by Year
 ################################################################################
 
-cat("\n=== Analysis 16: Weighted Lottery Salaries by Year ===\n")
+cat("\n=== Analysis 17: Weighted Lottery Salaries by Year ===\n")
 
 # Calculate weighted median and mean salaries by year for each policy
 lottery_salary_stats <- h1b_lottery %>%
@@ -888,7 +952,7 @@ lottery_salary_stats <- h1b_lottery %>%
 print(lottery_salary_stats)
 
 # Plot weighted median salary by year
-p15 <- ggplot(lottery_salary_stats, aes(x = PW_year, y = median_salary, color = policy, group = policy)) +
+p16 <- ggplot(lottery_salary_stats, aes(x = PW_year, y = median_salary, color = policy, group = policy)) +
   geom_line(linewidth = 1.2) +
   geom_point(size = 3) +
   scale_color_manual(values = c(
@@ -909,7 +973,7 @@ p15 <- ggplot(lottery_salary_stats, aes(x = PW_year, y = median_salary, color = 
   theme(legend.position = "bottom")
 
 # Plot weighted mean salary by year
-p16 <- ggplot(lottery_salary_stats, aes(x = PW_year, y = mean_salary, color = policy, group = policy)) +
+p17 <- ggplot(lottery_salary_stats, aes(x = PW_year, y = mean_salary, color = policy, group = policy)) +
   geom_line(linewidth = 1.2) +
   geom_point(size = 3) +
   scale_color_manual(values = c(
@@ -930,10 +994,10 @@ p16 <- ggplot(lottery_salary_stats, aes(x = PW_year, y = mean_salary, color = po
   theme(legend.position = "bottom")
 
 ################################################################################
-# ANALYSIS 17: Weighted Lottery - Age Distribution
+# ANALYSIS 18: Weighted Lottery - Age Distribution
 ################################################################################
 
-cat("\n=== Analysis 17: Weighted Lottery Age Distribution ===\n")
+cat("\n=== Analysis 18: Weighted Lottery Age Distribution ===\n")
 
 # Create weighted age data for histogram
 lottery_age_data <- h1b_lottery %>%
@@ -967,7 +1031,7 @@ lottery_age_stats <- lottery_age_expanded %>%
 
 print(lottery_age_stats)
 
-p17 <- ggplot(lottery_age_expanded, aes(x = age)) +
+p18 <- ggplot(lottery_age_expanded, aes(x = age)) +
   geom_histogram(binwidth = 2, fill = ifp_colors$dark_blue, color = "white") +
   geom_vline(data = lottery_age_stats, aes(xintercept = median_age),
              color = ifp_colors$orange, linewidth = 1, linetype = "solid") +
@@ -992,10 +1056,10 @@ p17 <- ggplot(lottery_age_expanded, aes(x = age)) +
   theme(strip.text = element_text(face = "bold", size = 10))
 
 ################################################################################
-# ANALYSIS 18: Weighted Lottery - Median Wage Premium by Year
+# ANALYSIS 19: Weighted Lottery - Median Wage Premium by Year
 ################################################################################
 
-cat("\n=== Analysis 18: Weighted Lottery Median Wage Premium ===\n")
+cat("\n=== Analysis 19: Weighted Lottery Median Wage Premium ===\n")
 
 # Calculate weighted median wage premium ($ and %) by year for each policy
 lottery_premium_stats <- h1b_lottery %>%
@@ -1024,7 +1088,7 @@ lottery_premium_stats <- h1b_lottery %>%
 print(lottery_premium_stats)
 
 # Plot median wage premium in dollars by year
-p18 <- ggplot(lottery_premium_stats, aes(x = PW_year, y = median_premium_dollars, color = policy, group = policy)) +
+p19 <- ggplot(lottery_premium_stats, aes(x = PW_year, y = median_premium_dollars, color = policy, group = policy)) +
   geom_hline(yintercept = 0, linetype = "dashed", color = ifp_colors$rich_black) +
   geom_line(linewidth = 1.2) +
   geom_point(size = 3) +
@@ -1046,7 +1110,7 @@ p18 <- ggplot(lottery_premium_stats, aes(x = PW_year, y = median_premium_dollars
   theme(legend.position = "bottom")
 
 # Plot median wage premium in percent by year
-p19 <- ggplot(lottery_premium_stats, aes(x = PW_year, y = median_premium_pct, color = policy, group = policy)) +
+p20 <- ggplot(lottery_premium_stats, aes(x = PW_year, y = median_premium_pct, color = policy, group = policy)) +
   geom_hline(yintercept = 0, linetype = "dashed", color = ifp_colors$rich_black) +
   geom_line(linewidth = 1.2) +
   geom_point(size = 3) +
@@ -1066,6 +1130,171 @@ p19 <- ggplot(lottery_premium_stats, aes(x = PW_year, y = median_premium_pct, co
   ) +
   theme_ifp() +
   theme(legend.position = "bottom")
+
+################################################################################
+# ANALYSIS 20: Weighted Lottery - Share with PhD
+################################################################################
+
+cat("\n=== Analysis 20: Weighted Lottery PhD Share ===\n")
+
+# Calculate share of PhD holders in weighted lottery for each policy
+lottery_phd_stats <- h1b_lottery %>%
+  mutate(has_phd = highest_ed == "PhD") %>%
+  pivot_longer(
+    cols = c(weight_status_quo, weight_2021, weight_eb),
+    names_to = "policy",
+    values_to = "weight"
+  ) %>%
+  filter(weight > 0) %>%
+  mutate(
+    policy = factor(case_when(
+      policy == "weight_status_quo" ~ "Status Quo",
+      policy == "weight_2021" ~ "2021 Rule",
+      policy == "weight_eb" ~ "Experience Benchmarking"
+    ), levels = c("Status Quo", "2021 Rule", "Experience Benchmarking"))
+  )
+
+# Create expanded dataset (weighted by lottery entries)
+lottery_phd_expanded <- lottery_phd_stats %>%
+  uncount(weights = weight)
+
+# Calculate percentage with PhD for each policy
+phd_share <- lottery_phd_expanded %>%
+  group_by(policy) %>%
+  summarise(
+    total = n(),
+    n_phd = sum(has_phd, na.rm = TRUE),
+    pct_phd = mean(has_phd, na.rm = TRUE) * 100,
+    .groups = "drop"
+  )
+
+print(phd_share)
+
+# Create bar chart
+p21 <- ggplot(phd_share, aes(x = policy, y = pct_phd)) +
+  geom_col(fill = ifp_colors$dark_blue) +
+  geom_text(aes(label = sprintf("%.1f%%", pct_phd)),
+            vjust = -0.5, size = 4, color = ifp_colors$rich_black) +
+  scale_y_continuous(labels = label_percent(scale = 1),
+                     expand = expansion(mult = c(0, 0.15))) +
+  labs(
+    title = "Weighted Lottery Simulation: Share with PhD",
+    subtitle = "Percentage of lottery winners with doctoral degrees",
+    x = NULL,
+    y = "Share with PhD (%)"
+  ) +
+  theme_ifp() +
+  theme(axis.text.x = element_text(angle = 20, hjust = 1))
+
+################################################################################
+# ANALYSIS 21: Weighted Lottery - Share with Prior F-1 Status
+################################################################################
+
+cat("\n=== Analysis 21: Weighted Lottery F-1 Status ===\n")
+
+# Calculate share of F-1 holders in weighted lottery for each policy
+lottery_f1_stats <- h1b_lottery %>%
+  mutate(has_f1 = petition_beneficiary_classif == "F1") %>%
+  pivot_longer(
+    cols = c(weight_status_quo, weight_2021, weight_eb),
+    names_to = "policy",
+    values_to = "weight"
+  ) %>%
+  filter(weight > 0) %>%
+  mutate(
+    policy = factor(case_when(
+      policy == "weight_status_quo" ~ "Status Quo",
+      policy == "weight_2021" ~ "2021 Rule",
+      policy == "weight_eb" ~ "Experience Benchmarking"
+    ), levels = c("Status Quo", "2021 Rule", "Experience Benchmarking"))
+  )
+
+# Create expanded dataset (weighted by lottery entries)
+lottery_f1_expanded <- lottery_f1_stats %>%
+  uncount(weights = weight)
+
+# Calculate percentage with F-1 status for each policy
+f1_share <- lottery_f1_expanded %>%
+  group_by(policy) %>%
+  summarise(
+    total = n(),
+    n_f1 = sum(has_f1, na.rm = TRUE),
+    pct_f1 = mean(has_f1, na.rm = TRUE) * 100,
+    .groups = "drop"
+  )
+
+print(f1_share)
+
+# Create bar chart
+p22 <- ggplot(f1_share, aes(x = policy, y = pct_f1)) +
+  geom_col(fill = ifp_colors$dark_blue) +
+  geom_text(aes(label = sprintf("%.1f%%", pct_f1)),
+            vjust = -0.5, size = 4, color = ifp_colors$rich_black) +
+  scale_y_continuous(labels = label_percent(scale = 1),
+                     expand = expansion(mult = c(0, 0.15))) +
+  labs(
+    title = "Weighted Lottery Simulation: Share with Prior F-1 Status",
+    subtitle = "Percentage of lottery winners with F-1 student visa background",
+    x = NULL,
+    y = "Share with Prior F-1 (%)"
+  ) +
+  theme_ifp() +
+  theme(axis.text.x = element_text(angle = 20, hjust = 1))
+
+################################################################################
+# ANALYSIS 22: Weighted Lottery - Share Underpaid
+################################################################################
+
+cat("\n=== Analysis 22: Weighted Lottery Underpayment Share ===\n")
+
+# Calculate share underpaid in weighted lottery for each policy
+lottery_underpay_stats <- h1b_lottery %>%
+  mutate(is_underpaid = petition_annual_pay_clean < pw_p50) %>%
+  pivot_longer(
+    cols = c(weight_status_quo, weight_2021, weight_eb),
+    names_to = "policy",
+    values_to = "weight"
+  ) %>%
+  filter(weight > 0) %>%
+  mutate(
+    policy = factor(case_when(
+      policy == "weight_status_quo" ~ "Status Quo",
+      policy == "weight_2021" ~ "2021 Rule",
+      policy == "weight_eb" ~ "Experience Benchmarking"
+    ), levels = c("Status Quo", "2021 Rule", "Experience Benchmarking"))
+  )
+
+# Create expanded dataset (weighted by lottery entries)
+lottery_underpay_expanded <- lottery_underpay_stats %>%
+  uncount(weights = weight)
+
+# Calculate percentage underpaid for each policy
+underpay_share <- lottery_underpay_expanded %>%
+  group_by(policy) %>%
+  summarise(
+    total = n(),
+    n_underpaid = sum(is_underpaid, na.rm = TRUE),
+    pct_underpaid = mean(is_underpaid, na.rm = TRUE) * 100,
+    .groups = "drop"
+  )
+
+print(underpay_share)
+
+# Create bar chart
+p23 <- ggplot(underpay_share, aes(x = policy, y = pct_underpaid)) +
+  geom_col(fill = ifp_colors$red) +
+  geom_text(aes(label = sprintf("%.1f%%", pct_underpaid)),
+            vjust = -0.5, size = 4, color = ifp_colors$rich_black) +
+  scale_y_continuous(labels = label_percent(scale = 1),
+                     expand = expansion(mult = c(0, 0.15))) +
+  labs(
+    title = "Weighted Lottery Simulation: Share Underpaid",
+    subtitle = "Percentage of lottery winners paying below 50th percentile",
+    x = NULL,
+    y = "Share Underpaid (%)"
+  ) +
+  theme_ifp() +
+  theme(axis.text.x = element_text(angle = 20, hjust = 1))
 
 ################################################################################
 # Export PDF
@@ -1114,26 +1343,40 @@ print(p12)
 # Page 13: Mean salary by year and policy
 print(p13)
 
-# Page 14: Age distribution by policy
+# Page 14: Eligible population - age distribution by policy
 print(p14)
 
-# Page 15: Weighted lottery - median salary by year
+# Page 15: Eligible population - PhD share by policy
 print(p15)
 
-# Page 16: Weighted lottery - mean salary by year
+# Page 16: Weighted lottery - median salary by year
 print(p16)
 
-# Page 17: Weighted lottery - age distribution
+# Page 17: Weighted lottery - mean salary by year
 print(p17)
 
-# Page 18: Weighted lottery - median wage premium ($) by year
+# Page 18: Weighted lottery - age distribution
 print(p18)
 
-# Page 19: Weighted lottery - median wage premium (%) by year
+# Page 19: Weighted lottery - median wage premium ($) by year
 print(p19)
+
+# Page 20: Weighted lottery - median wage premium (%) by year
+print(p20)
+
+# Page 21: Weighted lottery - PhD share
+print(p21)
+
+# Page 22: Weighted lottery - share with prior F-1 status
+print(p22)
+
+# Page 23: Weighted lottery - share underpaid
+print(p23)
 
 dev.off()
 
 cat("\n=== Analysis Complete ===\n")
 cat("Output saved to: output/analysis/economic_analysis.pdf\n")
-cat("Total pages: 19\n")
+cat("Total pages: 23\n")
+cat("\nPages 1-15: Eligible Population Analyses\n")
+cat("Pages 16-23: Weighted Lottery Simulation Analyses\n")
