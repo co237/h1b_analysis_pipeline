@@ -107,6 +107,12 @@ if (!exists("oflc_bases")) {
 
 h1b_22_24 <- read.csv(file.path(data_processed, "h1b_with_percentiles_and_native_comps.csv"))
 
+# Fix column names with .x suffix from prior merge
+if ("registration_lottery_year.x" %in% names(h1b_22_24)) {
+  h1b_22_24 <- h1b_22_24 %>%
+    rename(registration_lottery_year = registration_lottery_year.x)
+}
+
 h1b_22_24 %>%
   group_by(petition_beneficiary_edu_code) %>%
   summarise(n = n())

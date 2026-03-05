@@ -1,6 +1,8 @@
 # Raw Data Files
 
-This folder contains original source data files required for the H-1B analysis pipeline.
+This folder (`data/raw/`) contains original source data files required for the H-1B analysis pipeline.
+
+**Note:** This directory is a symbolic link to Google Drive for easy sharing and large file storage.
 
 ## Contents (~7.1 GB)
 
@@ -30,5 +32,5 @@ This folder contains original source data files required for the H-1B analysis p
 
 ## Notes
 - These files are NOT tracked in Git due to size
-- Place in `data/raw/` in your local repository clone
-- See main README.md for detailed data requirements
+- The `data/raw/` directory is a symlink to Google Drive
+- See main README.md and DATA_SOURCES.md for detailed data requirements

@@ -45,7 +45,7 @@ cat("===========================================================================
 # ============================================================================
 
 cat("STEP 1: Reading IPUMS crosswalk...\n")
-ipums_cw_file <- "~/Downloads/occ_occsoc_crosswalk_2000_onward (1).xlsx"
+ipums_cw_file <- file.path(other_data_path, "occ_occsoc_crosswalk_2000_onward.xlsx")
 
 if (!file.exists(ipums_cw_file)) {
   stop("IPUMS crosswalk not found: ", ipums_cw_file)

@@ -50,9 +50,8 @@ if (!file.exists(oflc_file)) {
 }
 oflc_bases <- as.data.frame(readRDS(oflc_file))
 
-# Standardize column names
-if ("SocCode" %in% names(oflc_bases)) {
-  names(oflc_bases)[names(oflc_bases) == "SocCode"] <- "SOC_CODE_clean"
+# Standardize column names - oflc_bases has SocCode, ACS_OCCSOC, and Area
+if ("Area" %in% names(oflc_bases)) {
   names(oflc_bases)[names(oflc_bases) == "Area"] <- "MSA_code"
 }
 
@@ -95,7 +94,7 @@ cat("Data loaded successfully! Ready for wage queries.\n\n")
 #'        "Bachelors", "Masters", "Prof degree", "PhD"
 #' @param experience Numeric. Years of potential work experience (0-50)
 #' @param msa_code Character or numeric. MSA code. Examples: "41860", 41860
-#' @param year Numeric. Fiscal year (2021-2025)
+#' @param year Numeric. Fiscal year (2021-2026)
 #' @param wage_type Character. Either "ALC" (standard) or "EDC" (ACWIA).
 #'        Default: "ALC"
 #'
@@ -153,10 +152,10 @@ get_prevailing_wages <- function(soc_code,
     ))
   }
 
-  if (!year %in% c(2021, 2022, 2023, 2024, 2025)) {
+  if (!year %in% c(2021, 2022, 2023, 2024, 2025, 2026)) {
     return(list(
       status = "error",
-      message = "Year must be 2021-2025"
+      message = "Year must be 2021-2026"
     ))
   }
 
@@ -213,12 +212,15 @@ get_prevailing_wages <- function(soc_code,
   acs_occsoc <- acs_match[1]  # Take first match if multiple
 
   # =============================================================================
-  # STEP 2: Look up OFLC Level 3 wage
+  # STEP 2: Look up OFLC Level 3 wage (using specific SOC code)
   # =============================================================================
+  # CRITICAL: Match by SocCode (not ACS_OCCSOC) to get the specific occupation's
+  # wage. Multiple SOC codes can map to the same ACS code but have different wages.
+  # Example: 11-1011, 11-1021, 11-1031 all map to 1110XX but have different Level3.
 
   oflc_match <- oflc_bases %>%
     filter(
-      SOC_CODE_clean == soc_clean,
+      SocCode == soc_clean,
       MSA_code == msa_clean,
       PW_year == year,
       wage_type == !!wage_type
@@ -228,7 +230,7 @@ get_prevailing_wages <- function(soc_code,
     return(list(
       status = "error",
       message = paste0("No OFLC wage data found for:\n",
-                      "  SOC: ", soc_clean, "\n",
+                      "  SOC: ", soc_clean, " (ACS: ", acs_occsoc, ")\n",
                       "  MSA: ", msa_clean, "\n",
                       "  Year: ", year, "\n",
                       "  Type: ", wage_type, "\n",

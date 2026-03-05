@@ -44,7 +44,7 @@
 #   and do not change across years — they capture the SHAPE of the education-
 #   experience curve, which is stable over time. What changes by year is the
 #   OFLC Level 3 wage anchor, which reflects OES wage updates each fiscal
-#   year. We support FY2021, FY2022, FY2023, and FY2025 (the current year).
+#   year. We support FY2021, FY2022, FY2023, FY2024, FY2025, and FY2026 (the current year).
 #
 #   File naming convention in oflc_data_path:
 #     Regular wages:  ALC_Export_FY2021.csv, ALC_Export_FY2022.csv, etc.
@@ -208,7 +208,7 @@ acs_data_19_23 <- acs_data_19_23 %>%
 #   is the OES-based area-occupation MEDIAN and serves as the wage anchor.
 #
 #   All files live in oflc_data_path. Naming convention:
-#     Current year (FY2025): ALC_Export.csv        / EDC_Export.csv
+#     Current year (FY2026): ALC_Export.csv        / EDC_Export.csv
 #     Historical years:      ALC_Export_FY2021.csv / EDC_Export_FY2021.csv
 #                            ALC_Export_FY2022.csv / EDC_Export_FY2022.csv
 #                            ALC_Export_FY2023.csv / EDC_Export_FY2023.csv
@@ -226,7 +226,7 @@ acs_data_19_23 <- acs_data_19_23 %>%
 #     oflc_bases[["ALC"]][["2021"]] — standard wages, FY2021
 #     oflc_bases[["ALC"]][["2022"]] — standard wages, FY2022
 #     oflc_bases[["ALC"]][["2023"]] — standard wages, FY2023
-#     oflc_bases[["ALC"]][["2025"]] — standard wages, FY2025 (current)
+#     oflc_bases[["ALC"]][["2026"]] — standard wages, FY2026 (current)
 #     oflc_bases[["EDC"]][["2021"]] — ACWIA wages, FY2021
 #     ... and so on
 #
@@ -382,13 +382,17 @@ oflc_bases <- list(
     "2021" = load_oflc("ALC_Export_FY2021.csv", use_2010_crosswalk = TRUE),
     "2022" = load_oflc("ALC_Export_FY2022.csv", use_2010_crosswalk = TRUE),
     "2023" = load_oflc("ALC_Export_FY2023.csv"),
-    "2025" = load_oflc("ALC_Export.csv")
+    "2024" = load_oflc("ALC_Export_FY2024.csv"),
+    "2025" = load_oflc("ALC_Export_FY2025.csv"),
+    "2026" = load_oflc("ALC_Export.csv")
   ),
   EDC = list(
     "2021" = load_oflc("EDC_Export_FY2021.csv", use_2010_crosswalk = TRUE),
     "2022" = load_oflc("EDC_Export_FY2022.csv", use_2010_crosswalk = TRUE),
     "2023" = load_oflc("EDC_Export_FY2023.csv"),
-    "2025" = load_oflc("EDC_Export.csv")
+    "2024" = load_oflc("EDC_Export_FY2024.csv"),
+    "2025" = load_oflc("EDC_Export_FY2025.csv"),
+    "2026" = load_oflc("EDC_Export.csv")
   )
 )
 
@@ -415,7 +419,7 @@ cat("Wage types:", paste(names(oflc_bases), collapse = ", "), "\n\n")
 #   curve — how much more a worker with a PhD earns than one with a bachelor's,
 #   or how wages grow with experience. These structural relationships are
 #   estimated from the 2019-2023 ACS and are assumed stable across the fiscal
-#   years we analyze (FY2021-FY2025). What changes across years is only the
+#   years we analyze (FY2021-FY2026). What changes across years is only the
 #   wage LEVEL, captured by the year-specific OFLC Level 3 anchor.
 #
 # THE RATIO FORMULA:
@@ -747,12 +751,15 @@ cat("=============================================================\n\n")
 cat("Saving OFLC wage data for interactive lookup...\n")
 
 # Flatten oflc_bases nested list into a single dataframe for lookup function
+# IMPORTANT: Keep SocCode so multiple SOC codes mapping to same ACS code
+# can be distinguished (e.g., 11-1011, 11-1021, 11-1031 → all map to 1110XX
+# but have different Level3 wages)
 oflc_flat <- bind_rows(
   bind_rows(oflc_bases$ALC, .id = "PW_year") %>% mutate(wage_type = "ALC"),
   bind_rows(oflc_bases$EDC, .id = "PW_year") %>% mutate(wage_type = "EDC")
 ) %>%
   mutate(PW_year = as.integer(PW_year)) %>%
-  select(SOC_CODE_clean, MSA_code, PW_year, wage_type, Level3)
+  select(SocCode, ACS_OCCSOC, Area, PW_year, wage_type, Level3)
 
 oflc_bases_file <- file.path(data_processed, "oflc_bases.rds")
 saveRDS(oflc_flat, oflc_bases_file)
