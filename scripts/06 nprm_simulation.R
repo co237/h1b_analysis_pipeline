@@ -57,13 +57,13 @@ if (!exists("h1b_22_24") || !"pw_p50" %in% names(h1b_22_24)) {
 #
 # Set the proposed percentile thresholds for each of the four wage levels.
 #
-# CURRENT SYSTEM (for reference):
+# STATUS QUO SYSTEM (for reference):
 #   pw_level_I_threshold   <- 17
 #   pw_level_II_threshold  <- 34
 #   pw_level_III_threshold <- 50
 #   pw_level_IV_threshold  <- 67
 #
-# PROPOSED SYSTEM (User-set percentiles):
+# 2021 RULE (proposed DOL reform):
 
 pw_level_I_threshold   <- 35
 pw_level_II_threshold  <- 53

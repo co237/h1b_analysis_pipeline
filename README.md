@@ -169,10 +169,10 @@ Simulates proposed DOL reforms by setting custom percentile thresholds for each 
 
 **User-Configurable Parameters:**
 ```r
-pw_level_I_threshold   <- 34  # Proposed threshold for Level I
-pw_level_II_threshold  <- 52  # Proposed threshold for Level II
-pw_level_III_threshold <- 70  # Proposed threshold for Level III
-pw_level_IV_threshold  <- 88  # Proposed threshold for Level IV
+pw_level_I_threshold   <- 35  # Proposed threshold for Level I (2021 Rule)
+pw_level_II_threshold  <- 53  # Proposed threshold for Level II (2021 Rule)
+pw_level_III_threshold <- 72  # Proposed threshold for Level III (2021 Rule)
+pw_level_IV_threshold  <- 90  # Proposed threshold for Level IV (2021 Rule)
 ```
 
 **Logic:**
@@ -344,9 +344,10 @@ The wage calculation combines national and area-specific components:
 - **Unique SOC codes in petitions:** 378
 - **Unique ACS codes (aggregated for Mincer):** 213
 
-### NPRM Simulation Results (34th, 52nd, 70th, 88th Percentile Thresholds)
-- **Petitions that qualify:** 23.8% (47,289 / 198,407)
-- **Among qualified, underpaid vs Mincer median:** 36.9% (17,445 / 47,289)
+### Policy Simulation Results
+The pipeline supports simulation of different wage threshold scenarios:
+- **Status Quo (17th, 34th, 50th, 67th)**: Current OFLC system
+- **2021 Rule (35th, 53rd, 72nd, 90th)**: Proposed DOL reform thresholds
 
 ## Detailed Methodology Documentation
 
