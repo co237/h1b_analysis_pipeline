@@ -1,10 +1,47 @@
 ################################################################################
 # Script 08: Economic Analysis of H-1B Prevailing Wage Policies
 #
-# Purpose: Generate IFP-branded charts and tables for NPRM economic analysis
+# PURPOSE & METHODOLOGY:
+# This script generates a comprehensive 39-page PDF analyzing different H-1B
+# prevailing wage policy proposals. It compares four policy scenarios:
 #
-# Input:  data/processed/h1b_with_mincer_wages.csv
-# Output: output/analysis/economic_analysis.pdf
+# 1. STATUS QUO: Current OFLC wage levels (Level I-IV)
+#    - All petitions with valid prevailing wage data are eligible
+#    - No minimum wage threshold beyond OFLC requirements
+#
+# 2. 2021 RULE: DOL's 2021 proposed percentile-based thresholds
+#    - Level I requires 35th percentile
+#    - Level II requires 53rd percentile
+#    - Level III requires 72nd percentile
+#    - Level IV requires 90th percentile
+#    - Uses petition_percentile_combined for eligibility
+#
+# 3. 50TH PERCENTILE MINIMUM: Uniform floor across all wage levels
+#    - All petitions must meet 50th percentile threshold
+#    - Uses petition_percentile_combined >= 50 for eligibility
+#
+# 4. EXPERIENCE BENCHMARKING: Age-adjusted prevailing wage (IFP's proposal)
+#    - Workers must be paid >= pw_p50 (50th percentile for their age/education)
+#    - Automatically accounts for worker experience via age
+#    - Zero underpayment by definition (eligible only if meeting threshold)
+#
+# ANALYSIS STRUCTURE:
+# - Pages 1-15: Eligible Population analyses (who can apply under each policy)
+# - Pages 16-23: Weighted Lottery simulation (who gets selected under weighted lottery)
+# - Pages 24-29: Industry and Occupation composition analyses
+# - Pages 30-35: Lifetime Earnings analyses (using NPV multipliers from Script 09)
+# - Pages 36-39: Policy comparison analyses (underpayment by industry/occupation)
+#
+# KEY CONCEPTS:
+# - Eligible Population: Workers who meet the policy's wage threshold
+# - Underpaid: Workers paid less than pw_p50 (similarly-qualified Americans)
+# - Wage Premium: % above/below pw_p50
+# - Weighted Lottery: Simulation where higher-paid workers get more lottery entries
+#   (1 entry at minimum, up to 4 entries at highest thresholds)
+#
+# Input:  data/processed/h1b_with_lifetime_earnings.csv
+#         (Output from Script 07 - includes age, pw_p50, lifetime earnings)
+# Output: output/analysis/economic_analysis.pdf (39 pages)
 #
 # Author: Institute for Progress
 # Date: March 2026
@@ -17,7 +54,33 @@ library(ggplot2)
 library(gridExtra)
 library(matrixStats)
 
-# IFP Brand Colors (from IFP_style2024.css) -----------------------------------
+################################################################################
+# IFP BRAND COLORS AND STYLING
+#
+# Institute for Progress uses a specific color palette for all visualizations.
+# These colors are defined in IFP_style2024.css and ensure brand consistency.
+#
+# PRIMARY COLORS:
+# - off_white (#fcfbeb): Background color for all plots
+# - rich_black (#373737): Default text and axis color
+# - purple (#b17ada): Primary accent color (often used for policy proposals)
+# - orange (#ff9762): Secondary accent color (highlights, medians)
+#
+# CATEGORY COLORS (by policy area):
+# - dark_blue (#3368ce): Immigration policy (used extensively in this analysis)
+# - green (#39d794): Biotechnology
+# - red (#ff6565): Metascience (also used for "underpaid" indicators)
+# - light_blue (#41c4fc): Emerging Technology
+# - yellow (#fbdb36): Energy
+# - pink (#ff9ee3): Infrastructure
+#
+# USAGE NOTES:
+# - Always use off_white backgrounds (never pure white)
+# - Use rich_black for text (better contrast than pure black)
+# - Limit to 2-3 colors per chart for clarity
+# - Use red for negative/underpaid indicators, green for positive/overpaid
+################################################################################
+
 ifp_colors <- list(
   off_white = "#fcfbeb",
   purple = "#b17ada",
@@ -28,10 +91,26 @@ ifp_colors <- list(
   light_blue = "#41c4fc",
   yellow = "#fbdb36",
   pink = "#ff9ee3",
-  dark_blue = "#3368ce"  # Immigration category
+  dark_blue = "#3368ce"  # Immigration category (primary color for this analysis)
 )
 
-# Set IFP theme for all plots --------------------------------------------------
+################################################################################
+# IFP THEME FUNCTION
+#
+# This function creates a consistent ggplot2 theme for all visualizations.
+# It ensures:
+# - IFP brand colors (off_white background, rich_black text)
+# - Appropriate text sizes for PDF output (11x8.5 inches)
+# - Clean, minimal gridlines (major only, no minor gridlines)
+# - Consistent title/subtitle/axis formatting
+#
+# USAGE: Add "+ theme_ifp()" to every ggplot object in this script
+#
+# CUSTOMIZATION: Individual plots can override specific theme elements after
+# applying theme_ifp(), e.g.:
+#   ggplot(...) + theme_ifp() + theme(axis.text.x = element_text(angle = 45))
+################################################################################
+
 theme_ifp <- function() {
   theme_minimal() +
     theme(
@@ -59,26 +138,62 @@ cat(sprintf("Loaded %s petitions\n", format(nrow(h1b), big.mark = ",")))
 # Create output directory ------------------------------------------------------
 dir.create("output/analysis", showWarnings = FALSE, recursive = TRUE)
 
-# Data preparation -------------------------------------------------------------
+################################################################################
+# DATA PREPARATION AND FILTERING
+#
+# We start with the output from Script 07 (h1b_with_lifetime_earnings.csv) which
+# includes:
+# - petition_annual_pay_clean: The salary offered to the H-1B worker
+# - pw_p50: 50th percentile prevailing wage for workers of similar age/education
+# - age: Worker age (imputed from education in Script 04)
+# - lifetime_earnings_3pct/7pct: NPV of expected lifetime earnings
+# - petition_percentile_combined: Worker's salary percentile within their occupation
+# - OFLC wage levels (Level1_full, Level2_full, Level3_full, Level4_full)
+#
+# FILTERING LOGIC:
+# We filter to "valid" petitions that have:
+# 1. Non-missing salary (petition_annual_pay_clean)
+# 2. Non-missing prevailing wage benchmark (pw_p50)
+# 3. Positive values for both (excludes data errors)
+# 4. Valid age group (20-59 years)
+#
+# This ensures we can calculate wage premiums and policy eligibility for all
+# petitions in our analysis dataset.
+#
+# KEY DERIVED VARIABLES:
+# - wage_premium_pct: How much above/below pw_p50 (in percent)
+#   Example: If paid $100k and pw_p50 is $90k, premium = +11.1%
+# - underpaid: Binary indicator (TRUE if paid less than similarly-qualified Americans)
+# - age_group_5yr: 5-year age bins for age-stratified analyses
+################################################################################
+
 cat("\nPreparing data for analysis...\n")
 
 # Filter to valid petitions with required fields
 h1b_valid <- h1b %>%
   filter(
-    !is.na(petition_annual_pay_clean),
-    !is.na(pw_p50),
-    petition_annual_pay_clean > 0,
-    pw_p50 > 0
+    !is.na(petition_annual_pay_clean),  # Must have salary data
+    !is.na(pw_p50),                     # Must have age-adjusted prevailing wage
+    petition_annual_pay_clean > 0,      # Exclude zero/negative salaries (data errors)
+    pw_p50 > 0                          # Exclude zero/negative prevailing wages
   )
 
 cat(sprintf("Valid petitions for analysis: %s\n",
             format(nrow(h1b_valid), big.mark = ",")))
 
-# Calculate wage premium (percent above/below 50th percentile)
+# Calculate wage premium and create age groups
 h1b_valid <- h1b_valid %>%
   mutate(
+    # Wage premium: percentage above/below what similarly-qualified Americans earn
+    # Positive = paid more than benchmark, Negative = paid less
     wage_premium_pct = ((petition_annual_pay_clean - pw_p50) / pw_p50) * 100,
+
+    # Underpaid indicator: TRUE if paid less than pw_p50
+    # This is the key metric for assessing wage displacement concerns
     underpaid = petition_annual_pay_clean < pw_p50,
+
+    # 5-year age groups for age-stratified analyses
+    # We use 5-year bins (20-24, 25-29, etc.) to balance granularity and sample size
     age_group_5yr = case_when(
       age >= 20 & age <= 24 ~ "20-24",
       age >= 25 & age <= 29 ~ "25-29",
@@ -88,13 +203,25 @@ h1b_valid <- h1b_valid %>%
       age >= 45 & age <= 49 ~ "45-49",
       age >= 50 & age <= 54 ~ "50-54",
       age >= 55 & age <= 59 ~ "55-59",
-      TRUE ~ NA_character_
+      TRUE ~ NA_character_   # Ages outside 20-59 (should be rare after Script 04)
     )
   ) %>%
-  filter(!is.na(age_group_5yr))
+  filter(!is.na(age_group_5yr))  # Remove any remaining invalid ages
 
 ################################################################################
 # ANALYSIS 1: Overall Underpayment Share and Median Wage Premium
+#
+# This opening page provides the key headline statistics:
+# - Total number of H-1B petitions with valid experience benchmarking data
+# - Percentage paid less than similarly-qualified Americans (underpayment rate)
+# - Median wage premium (typical % above/below benchmark)
+#
+# INTERPRETATION:
+# If underpayment rate is high (e.g., 30%+), this suggests significant wage
+# displacement concerns. If median premium is negative, the typical H-1B worker
+# is paid less than comparable Americans.
+#
+# OUTPUT: Text-based summary page for PDF (page 1)
 ################################################################################
 
 cat("\n=== Analysis 1: Overall Underpayment ===\n")
@@ -127,7 +254,7 @@ p1 <- ggplot() +
            label = sprintf("%.1f%%", overall_stats$pct_underpaid),
            size = 24, fontface = "bold", color = ifp_colors$dark_blue) +
   annotate("text", x = 0.5, y = 0.35,
-           label = "of petitions pay below what\nsimilarly-qualified Americans earn",
+           label = "of petitions are paid below what\nsimilarly-qualified Americans earn",
            size = 6, color = ifp_colors$rich_black) +
   annotate("text", x = 0.5, y = 0.15,
            label = sprintf("Median wage premium vs. similarly-qualified: %.1f%%", overall_stats$median_premium),
@@ -142,12 +269,8 @@ p1 <- ggplot() +
 
 cat("\n=== Analysis 2: Salary vs Wage Premium ===\n")
 
-# Sample for visualization (too many points otherwise)
-set.seed(123)
-h1b_sample <- h1b_valid %>%
-  sample_n(min(20000, nrow(h1b_valid)))
-
-p2 <- ggplot(h1b_sample, aes(x = petition_annual_pay_clean, y = wage_premium_pct)) +
+# Use full dataset (no sampling)
+p2 <- ggplot(h1b_valid, aes(x = petition_annual_pay_clean, y = wage_premium_pct)) +
   geom_hline(yintercept = 0, linetype = "dashed", color = ifp_colors$rich_black, linewidth = 0.5) +
   geom_point(alpha = 0.3, color = ifp_colors$dark_blue, size = 0.5) +
   geom_smooth(method = "lm", formula = y ~ x,
@@ -163,6 +286,66 @@ p2 <- ggplot(h1b_sample, aes(x = petition_annual_pay_clean, y = wage_premium_pct
     y = "Wage Premium (%)"
   ) +
   theme_ifp()
+
+################################################################################
+# ANALYSIS 2A: Scatterplot - Salary vs Wage Premium (Colored by 2021 Rule Eligibility)
+#
+# This visualization shows the same data as Analysis 2, but colors points based
+# on whether they would be eligible under the 2021 Rule policy.
+#
+# COLOR CODING:
+# - GREEN: Eligible under 2021 Rule (meets percentile threshold for their wage level)
+# - RED: Ineligible under 2021 Rule (below percentile threshold)
+#
+# INTERPRETATION:
+# This reveals the spatial distribution of who gets excluded by the 2021 Rule.
+# If red dots cluster in certain salary/premium ranges, it shows which workers
+# are systematically excluded by the policy.
+################################################################################
+
+cat("\n=== Analysis 2A: Salary vs Wage Premium (2021 Rule Eligibility) ===\n")
+
+# Calculate 2021 Rule eligibility for full dataset
+# (This is the same logic used later in Analysis 6)
+h1b_with_2021_eligibility <- h1b_valid %>%
+  mutate(
+    # Calculate 2021 Rule threshold based on wage level
+    threshold_2021 = case_when(
+      PW_WAGE_LEVEL == "I" ~ 35,   # Entry level
+      PW_WAGE_LEVEL == "II" ~ 53,  # Qualified
+      PW_WAGE_LEVEL == "III" ~ 72, # Experienced
+      PW_WAGE_LEVEL == "IV" ~ 90,  # Fully competent
+      TRUE ~ NA_real_
+    ),
+    # Determine eligibility
+    eligible_2021 = !is.na(threshold_2021) &
+                    !is.na(petition_percentile_combined) &
+                    petition_percentile_combined >= threshold_2021,
+    # Create label for plotting
+    eligibility_2021 = if_else(eligible_2021, "Eligible under 2021 Rule", "Ineligible under 2021 Rule")
+  )
+
+p2a <- ggplot(h1b_with_2021_eligibility, aes(x = petition_annual_pay_clean, y = wage_premium_pct, color = eligibility_2021)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = ifp_colors$rich_black, linewidth = 0.5) +
+  geom_point(alpha = 0.4, size = 0.5) +
+  scale_color_manual(
+    values = c("Eligible under 2021 Rule" = ifp_colors$green,
+               "Ineligible under 2021 Rule" = ifp_colors$red),
+    name = "2021 Rule Status"
+  ) +
+  scale_x_continuous(labels = dollar_format(scale = 1/1000, suffix = "K"),
+                     limits = c(0, 250000)) +
+  scale_y_continuous(labels = label_percent(scale = 1),
+                     limits = c(-100, 200)) +
+  labs(
+    title = "Eligible Population: Salary vs Wage Premium by 2021 Rule Eligibility",
+    subtitle = "Green = eligible under 2021 Rule | Red = ineligible under 2021 Rule",
+    x = "Annual Salary",
+    y = "Wage Premium (%)"
+  ) +
+  theme_ifp() +
+  theme(legend.position = "bottom") +
+  guides(color = guide_legend(override.aes = list(size = 4, alpha = 1)))
 
 ################################################################################
 # ANALYSIS 3: Underpayment Rates by Age Cohort
@@ -200,7 +383,7 @@ p3 <- ggplot(underpayment_by_cohort, aes(x = age_cohort, y = pct_underpaid)) +
                      expand = expansion(mult = c(0, 0.1))) +
   labs(
     title = "Eligible Population: Underpayment Rates by Age Cohort",
-    subtitle = "Percentage paying less than similarly-qualified Americans",
+    subtitle = "Percentage paid less than similarly-qualified Americans",
     x = "Age Cohort",
     y = "Underpaid (%)"
   ) +
@@ -232,7 +415,7 @@ p4 <- ggplot(underpayment_by_age, aes(x = age_group_5yr, y = pct_underpaid)) +
                      expand = expansion(mult = c(0, 0.1))) +
   labs(
     title = "Eligible Population: Underpayment by 5-Year Age Group",
-    subtitle = "Percentage paying less than similarly-qualified Americans",
+    subtitle = "Percentage paid less than similarly-qualified Americans",
     x = "Age Group",
     y = "Underpaid (%)"
   ) +
@@ -274,38 +457,85 @@ p5 <- ggplot(premium_by_age, aes(x = age_group_5yr, y = median_premium)) +
 
 ################################################################################
 # ANALYSIS 6: Policy Comparison - Underpayment Rates
+#
+# This is the CRITICAL section that defines eligibility under each policy proposal.
+# Understanding these definitions is essential for interpreting all subsequent analyses.
+#
+# FOUR POLICY SCENARIOS:
+#
+# 1. STATUS QUO (eligible_status_quo):
+#    - Current OFLC rules: All petitions with valid prevailing wage data are eligible
+#    - No additional salary thresholds beyond existing OFLC Level I-IV requirements
+#    - RESULT: Nearly everyone in h1b_valid is eligible
+#
+# 2. 2021 RULE (eligible_2021):
+#    - DOL's 2021 proposed percentile-based thresholds tied to OFLC wage levels
+#    - Uses petition_percentile_combined (worker's salary percentile in their occupation)
+#    - Thresholds by wage level:
+#      * Level I (entry-level) → must be at 35th percentile
+#      * Level II (qualified) → must be at 53rd percentile
+#      * Level III (experienced) → must be at 72nd percentile
+#      * Level IV (fully competent) → must be at 90th percentile
+#    - RATIONALE: Higher skill levels should command higher relative wages
+#    - ISSUE: Does NOT account for age/experience (young PhD can be underpaid at 35th percentile)
+#
+# 3. 50TH PERCENTILE MINIMUM (eligible_p50):
+#    - Uniform floor: ALL workers must be at 50th percentile in their occupation
+#    - Simpler than 2021 Rule (same threshold regardless of declared wage level)
+#    - ISSUE: Still doesn't account for age/experience differences
+#
+# 4. EXPERIENCE BENCHMARKING (eligible_eb):
+#    - IFP's proposal: Must meet pw_p50 (age-adjusted prevailing wage)
+#    - Automatically accounts for experience via age
+#    - Example: 25-year-old must earn what typical 25-year-old earns at 50th percentile
+#    - RESULT: Zero underpayment by definition (only eligible if meeting threshold)
+#
+# KEY INSIGHT: The first three policies can have "eligible but underpaid" workers
+# (they meet the policy threshold but are still paid less than similarly-qualified
+# Americans). Experience Benchmarking eliminates this by using age-adjusted benchmarks.
+#
+# UNDERPAYMENT DEFINITION ACROSS ALL POLICIES:
+# A worker is "underpaid" if petition_annual_pay_clean < pw_p50, regardless of
+# which policy made them eligible. This allows apples-to-apples comparison of
+# underpayment rates across policies.
 ################################################################################
 
 cat("\n=== Analysis 6: Policy Comparison ===\n")
 
-# Prepare data for policy comparison
+# Create policy eligibility indicators for all four scenarios
 h1b_policy <- h1b_valid %>%
   mutate(
-    # Status Quo: All petitions with non-missing pw_p50 (which is all in h1b_valid)
+    # STATUS QUO: Current rules - all valid petitions are eligible
     eligible_status_quo = !is.na(pw_p50),
     underpaid_status_quo = petition_annual_pay_clean < pw_p50,
 
-    # 2021 Rule: Uses petition_percentile_combined against new thresholds
-    # Level I=35th, II=53rd, III=72nd, IV=90th
+    # 2021 RULE: Percentile thresholds tied to OFLC wage levels
+    # Calculate the required percentile threshold based on declared wage level
     threshold_2021 = case_when(
-      PW_WAGE_LEVEL == "I" ~ 35,
-      PW_WAGE_LEVEL == "II" ~ 53,
-      PW_WAGE_LEVEL == "III" ~ 72,
-      PW_WAGE_LEVEL == "IV" ~ 90,
-      TRUE ~ NA_real_
+      PW_WAGE_LEVEL == "I" ~ 35,   # Entry level
+      PW_WAGE_LEVEL == "II" ~ 53,  # Qualified
+      PW_WAGE_LEVEL == "III" ~ 72, # Experienced
+      PW_WAGE_LEVEL == "IV" ~ 90,  # Fully competent
+      TRUE ~ NA_real_              # Missing or invalid wage level
     ),
+    # Eligible if salary meets the threshold for declared wage level
     eligible_2021 = !is.na(threshold_2021) &
                     !is.na(petition_percentile_combined) &
                     petition_percentile_combined >= threshold_2021,
+    # Can still be underpaid even if eligible (if below age-adjusted benchmark)
     underpaid_2021 = eligible_2021 & petition_annual_pay_clean < pw_p50,
 
-    # 50th Percentile Uniform: petition_percentile_combined must be >= 50
+    # 50TH PERCENTILE MINIMUM: Simple uniform floor
+    # Must be at 50th percentile in occupation (no variation by wage level)
     eligible_p50 = !is.na(petition_percentile_combined) & petition_percentile_combined >= 50,
+    # Can still be underpaid even if eligible (if below age-adjusted benchmark)
     underpaid_p50 = eligible_p50 & petition_annual_pay_clean < pw_p50,
 
-    # Experience Benchmarking: Simply eligible if pay >= pw_p50
+    # EXPERIENCE BENCHMARKING: Must meet age-adjusted prevailing wage
+    # Eligible only if salary >= pw_p50
     eligible_eb = petition_annual_pay_clean >= pw_p50,
-    underpaid_eb = FALSE  # By definition, all eligible meet pw_p50
+    # By definition, no one eligible under this policy is underpaid
+    underpaid_eb = FALSE
   )
 
 # Calculate policy statistics
@@ -341,7 +571,7 @@ p6 <- ggplot(policy_stats, aes(x = policy, y = pct_underpaid)) +
                      expand = expansion(mult = c(0, 0.15))) +
   labs(
     title = "Eligible Population: Underpayment Rates by Policy",
-    subtitle = "Percentage of eligible workers paying less than similarly-qualified Americans",
+    subtitle = "Percentage of eligible workers paid less than similarly-qualified Americans",
     x = NULL,
     y = "Underpaid Among Eligible (%)"
   ) +
@@ -350,14 +580,47 @@ p6 <- ggplot(policy_stats, aes(x = policy, y = pct_underpaid)) +
 
 ################################################################################
 # ANALYSIS 7: Policy Comparison Table
+#
+# This table shows the trade-offs of each policy using three metrics:
+#
+# 1. % INELIGIBLE (False Exclusions):
+#    - Share of all petitions that fail to meet the policy threshold
+#    - Higher = more restrictive policy (excludes more applicants)
+#    - Status Quo = 0% (everyone eligible)
+#    - Experience Benchmarking ≈ 30% (excludes underpaid workers)
+#
+# 2. % FALSE NEGATIVES (Share of underpaid workers who are still eligible):
+#    - Of all underpaid workers, what % still pass the policy test?
+#    - These are workers paid less than Americans who slip through
+#    - Higher = policy fails to catch underpayment
+#    - Experience Benchmarking = 0% (by design, no underpaid workers are eligible)
+#
+# 3. % FALSE POSITIVES (Share of positive premium workers who are ineligible):
+#    - Of all workers with positive wage premiums, what % are blocked?
+#    - These are "good" employers mistakenly excluded
+#    - Higher = policy unnecessarily restricts high-quality applications
+#    - Status Quo = 0% (no one excluded)
+#
+# POLICY TRADE-OFF:
+# More restrictive policies (like Experience Benchmarking) have:
+# - HIGH % Ineligible (many excluded)
+# - LOW % False Negatives (few underpaid workers slip through)
+# - LOW % False Positives (few good employers blocked)
+#
+# Less restrictive policies (like Status Quo) have:
+# - LOW % Ineligible (few excluded)
+# - HIGH % False Negatives (many underpaid workers slip through)
+# - LOW % False Positives (few good employers blocked)
+#
+# OUTPUT: Formatted table showing these three metrics for each policy
 ################################################################################
 
 cat("\n=== Analysis 7: Policy Comparison Table ===\n")
 
-# Calculate baseline totals (Status Quo)
-total_n <- nrow(h1b_policy)
-total_underpaid <- sum(h1b_policy$petition_annual_pay_clean < h1b_policy$pw_p50, na.rm = TRUE)
-total_positive_premium <- sum(h1b_policy$petition_annual_pay_clean >= h1b_policy$pw_p50, na.rm = TRUE)
+# Calculate baseline totals for denominator calculations
+total_n <- nrow(h1b_policy)  # Total petitions
+total_underpaid <- sum(h1b_policy$petition_annual_pay_clean < h1b_policy$pw_p50, na.rm = TRUE)  # All underpaid
+total_positive_premium <- sum(h1b_policy$petition_annual_pay_clean >= h1b_policy$pw_p50, na.rm = TRUE)  # All paying competitively
 
 cat(sprintf("Total petitions: %s\n", format(total_n, big.mark = ",")))
 cat(sprintf("Total underpaid (< pw_p50): %s\n", format(total_underpaid, big.mark = ",")))
@@ -395,13 +658,29 @@ policy_table_data <- tibble(
   )
 ) %>%
   mutate(
+    # Calculate confusion matrix components
+    # TP = correctly excluded underpaid workers (ineligible AND underpaid)
+    true_positive_n = ineligible_n - ineligible_positive_n,
+    # TN = correctly included fairly-paid workers (eligible AND fairly-paid)
+    true_negative_n = total_positive_premium - ineligible_positive_n,
+    # FN = incorrectly included underpaid workers (already calculated)
+    false_negative_n = eligible_underpaid_n,
+    # FP = incorrectly excluded fairly-paid workers (already calculated)
+    false_positive_n = ineligible_positive_n,
+
+    # Accuracy = (TP + TN) / Total
+    accuracy = ((true_positive_n + true_negative_n) / total_n) * 100,
+
+    # Format display columns
     `% Ineligible\n(Fail to Meet\nPolicy Threshold)` = sprintf("%.1f%%", (ineligible_n / total_n) * 100),
-    `% False Negatives\n(Eligible but Pay Less\nthan Similarly-Qualified)` = sprintf("%.1f%%", (eligible_underpaid_n / total_underpaid) * 100),
-    `% False Positives\n(Excluded but Would Pay\nCompetitively)` = sprintf("%.1f%%", (ineligible_positive_n / total_positive_premium) * 100)
+    `% False Negatives\n(Share of underpaid workers\nwho are still eligible)` = sprintf("%.1f%%", (eligible_underpaid_n / total_underpaid) * 100),
+    `% False Positives\n(Share of positive premium\nworkers who are ineligible)` = sprintf("%.1f%%", (ineligible_positive_n / total_positive_premium) * 100),
+    `Accuracy Rate\n(Correctly Classified)` = sprintf("%.1f%%", accuracy)
   ) %>%
   select(Policy, `% Ineligible\n(Fail to Meet\nPolicy Threshold)`,
-         `% False Negatives\n(Eligible but Pay Less\nthan Similarly-Qualified)`,
-         `% False Positives\n(Excluded but Would Pay\nCompetitively)`)
+         `% False Negatives\n(Share of underpaid workers\nwho are still eligible)`,
+         `% False Positives\n(Share of positive premium\nworkers who are ineligible)`,
+         `Accuracy Rate\n(Correctly Classified)`)
 
 print(policy_table_data)
 
@@ -422,7 +701,7 @@ p7 <- ggplot() +
   annotation_custom(table_grob) +
   labs(
     title = "Eligible Population: Policy Comparison Summary",
-    subtitle = "All percentages are shares of their respective totals\n(% Ineligible: of all petitions | False Negatives: of all underpaid | False Positives: of all positive premium)"
+    subtitle = "All percentages are shares of their respective totals\n(% Ineligible: of all petitions | False Negatives: of all underpaid workers | False Positives: of all positive premium workers)"
   ) +
   theme_void() +
   theme(
@@ -863,43 +1142,94 @@ p15 <- ggplot(eligible_phd_stats, aes(x = policy, y = pct_phd)) +
   theme(axis.text.x = element_text(angle = 20, hjust = 1))
 
 ################################################################################
-# ANALYSIS 16: Weighted Lottery Simulation - Assign Weights
+# ANALYSIS 16-23: WEIGHTED LOTTERY SIMULATION
+#
+# BACKGROUND: H-1B visas are currently allocated through a random lottery when
+# demand exceeds supply (which it does every year). Various proposals would
+# replace the random lottery with a "weighted" lottery where higher-paid workers
+# get more lottery entries.
+#
+# WEIGHTED LOTTERY CONCEPT:
+# Instead of giving everyone 1 lottery entry, we give people 1-4 entries based
+# on how much they're paid. Someone with 4 entries has 4× the chance of winning
+# compared to someone with 1 entry.
+#
+# WEIGHT ASSIGNMENT BY POLICY:
+#
+# 1. STATUS QUO WEIGHTED:
+#    - Uses OFLC wage levels (Level1_full, Level2_full, Level3_full, Level4_full)
+#    - 1 entry if paid at Level I or II
+#    - 2 entries if paid at Level III
+#    - 3 entries if paid at Level IV
+#    - 4 entries if paid above Level IV
+#    - ISSUE: OFLC levels vary wildly by occupation and don't account for age
+#
+# 2. 2021 RULE WEIGHTED:
+#    - Uses petition_percentile_combined (within-occupation percentile)
+#    - 1 entry at 35th-52nd percentile
+#    - 2 entries at 53rd-71st percentile
+#    - 3 entries at 72nd-89th percentile
+#    - 4 entries at 90th+ percentile
+#    - ISSUE: Still doesn't account for age/experience
+#
+# 3. EXPERIENCE BENCHMARKING WEIGHTED:
+#    - Uses age-adjusted percentiles (pw_p50, pw_p62, pw_p75, pw_p90)
+#    - 1 entry at 50th-61st percentile for your age
+#    - 2 entries at 62nd-74th percentile for your age
+#    - 3 entries at 75th-89th percentile for your age
+#    - 4 entries at 90th+ percentile for your age
+#    - ADVANTAGE: Accounts for experience via age
+#
+# SIMULATION METHOD:
+# We simulate the weighted lottery by "expanding" the dataset: each petition
+# gets duplicated by its weight. Someone with weight=3 appears 3 times in the
+# expanded dataset. We then calculate statistics on this expanded dataset to
+# represent "who would be selected" under the weighted lottery.
+#
+# INTERPRETATION:
+# "Weighted lottery" analyses (pages 16-23) show characteristics of selected
+# workers, while "eligible population" analyses (pages 1-15) show characteristics
+# of applicants. The difference reveals how the weighted lottery changes outcomes.
 ################################################################################
 
-cat("\n=== Analysis 16: Weighted Lottery Simulation ===\n")
+cat("\n=== Analysis 16: Weighted Lottery Simulation - Assign Weights ===\n")
 
-# Assign lottery weights based on each policy's criteria
+# Assign lottery weights (1-4 entries) based on each policy's criteria
 h1b_lottery <- h1b_policy %>%
   filter(!is.na(PW_year), !is.na(age)) %>%
   mutate(
-    # Status Quo: Weights based on OFLC Level thresholds (using _full for annual wages)
+    # STATUS QUO WEIGHTED: Based on OFLC Level thresholds
+    # Uses _full variables (annual wages) to determine weight
     weight_status_quo = case_when(
-      !eligible_status_quo ~ 0,  # Ineligible = 0 weight
-      petition_annual_pay_clean >= Level4_full ~ 4,
-      petition_annual_pay_clean >= Level3_full ~ 3,
-      petition_annual_pay_clean >= Level2_full ~ 2,
-      petition_annual_pay_clean >= Level1_full ~ 1,
-      TRUE ~ 1  # Below Level1 gets 1 entry
+      !eligible_status_quo ~ 0,                         # Ineligible = no entries
+      petition_annual_pay_clean >= Level4_full ~ 4,    # Above Level IV = 4 entries
+      petition_annual_pay_clean >= Level3_full ~ 3,    # Level III-IV = 3 entries
+      petition_annual_pay_clean >= Level2_full ~ 2,    # Level II-III = 2 entries
+      petition_annual_pay_clean >= Level1_full ~ 1,    # Level I-II = 1 entry
+      TRUE ~ 1                                          # Below Level I but eligible = 1 entry
     ),
 
-    # 2021 Rule: Weights based on petition_percentile_combined thresholds
+    # 2021 RULE WEIGHTED: Based on within-occupation percentile thresholds
+    # Uses same percentile cutoffs as eligibility (35, 53, 72, 90)
     weight_2021 = case_when(
-      !eligible_2021 ~ 0,  # Ineligible = 0 weight
-      petition_percentile_combined >= 90 ~ 4,
-      petition_percentile_combined >= 72 ~ 3,
-      petition_percentile_combined >= 53 ~ 2,
-      petition_percentile_combined >= 35 ~ 1,
-      TRUE ~ 0
+      !eligible_2021 ~ 0,                               # Ineligible = no entries
+      petition_percentile_combined >= 90 ~ 4,           # 90th+ percentile = 4 entries
+      petition_percentile_combined >= 72 ~ 3,           # 72nd-89th = 3 entries
+      petition_percentile_combined >= 53 ~ 2,           # 53rd-71st = 2 entries
+      petition_percentile_combined >= 35 ~ 1,           # 35th-52nd = 1 entry
+      TRUE ~ 0                                          # Below 35th = ineligible
     ),
 
-    # Experience Benchmarking: Weights based on pw_p50/p62/p75/p90
+    # EXPERIENCE BENCHMARKING WEIGHTED: Based on age-adjusted percentiles
+    # Uses pw_p50, pw_p62, pw_p75, pw_p90 (age-specific thresholds)
+    # These come from the Mincer regression (Script 06)
     weight_eb = case_when(
-      !eligible_eb ~ 0,  # Ineligible = 0 weight
-      petition_annual_pay_clean >= pw_p90 ~ 4,
-      petition_annual_pay_clean >= pw_p75 ~ 3,
-      petition_annual_pay_clean >= pw_p62 ~ 2,
-      petition_annual_pay_clean >= pw_p50 ~ 1,
-      TRUE ~ 0
+      !eligible_eb ~ 0,                                 # Ineligible = no entries
+      petition_annual_pay_clean >= pw_p90 ~ 4,         # 90th+ for age = 4 entries
+      petition_annual_pay_clean >= pw_p75 ~ 3,         # 75th-89th for age = 3 entries
+      petition_annual_pay_clean >= pw_p62 ~ 2,         # 62nd-74th for age = 2 entries
+      petition_annual_pay_clean >= pw_p50 ~ 1,         # 50th-61st for age = 1 entry
+      TRUE ~ 0                                          # Below 50th for age = ineligible
     )
   )
 
@@ -1289,12 +1619,43 @@ p23 <- ggplot(underpay_share, aes(x = policy, y = pct_underpaid)) +
                      expand = expansion(mult = c(0, 0.15))) +
   labs(
     title = "Weighted Lottery Simulation: Share Underpaid",
-    subtitle = "Percentage of lottery winners paying less than similarly-qualified Americans",
+    subtitle = "Percentage of lottery winners paid less than similarly-qualified Americans",
     x = NULL,
     y = "Share Underpaid (%)"
   ) +
   theme_ifp() +
   theme(axis.text.x = element_text(angle = 20, hjust = 1))
+
+################################################################################
+# ANALYSIS 23-29 & 31-39: INDUSTRY AND OCCUPATION ANALYSES
+#
+# These analyses break down H-1B petitions by industry (NAICS code) and
+# occupation (SOC title) to understand:
+# 1. Which industries/occupations have highest underpayment rates
+# 2. How policy proposals change industry/occupation mix
+# 3. Whether underpayment varies by industry/occupation
+#
+# INDUSTRY CLASSIFICATION (NAICS):
+# - petition_employer_naics: Employer's 6-digit NAICS code
+# - Top industries are dominated by tech (541511, 541512, 511210)
+# - "999999" = Unknown/Not Specified (data quality issue)
+#
+# OCCUPATION CLASSIFICATION (SOC):
+# - SOC_TITLE: Occupation title (e.g., "SOFTWARE DEVELOPERS")
+# - Top occupations are tech-heavy (software developers, computer systems analysts)
+#
+# KEY QUESTIONS:
+# - Are certain industries systematically underpaying H-1B workers?
+# - Do policy proposals change the industry mix (e.g., favor/disfavor certain sectors)?
+# - Does weighted lottery shift composition toward higher-paying industries?
+#
+# ANALYSIS STRUCTURE:
+# - Analyses 23-24: Underpayment rates by industry/occupation (eligible population)
+# - Analyses 25-26: Industry mix across policies (% in each industry)
+# - Analyses 27-28: Occupation mix across policies (% in each occupation)
+# - Analyses 31-32: Industry underpayment rates by policy (policy comparison)
+# - Analyses 33-34: Occupation underpayment rates by policy (policy comparison)
+################################################################################
 
 ################################################################################
 # ANALYSIS 23: Underpayment by Top 10 Industries (Eligible Population)
@@ -1303,6 +1664,7 @@ p23 <- ggplot(underpay_share, aes(x = policy, y = pct_underpaid)) +
 cat("\n=== Analysis 23: Underpayment by Top 10 Industries ===\n")
 
 # NAICS code lookup for top industries
+# Note: Some codes are 5-digit (broader categories), others are 6-digit (specific)
 naics_lookup <- c(
   "541511" = "Custom Computer Programming",
   "541512" = "Computer Systems Design",
@@ -1672,7 +2034,37 @@ p29 <- ggplot(occupation_mix_lottery_expanded, aes(x = reorder(occupation_label,
   theme(strip.text = element_text(face = "bold", size = 10))
 
 ################################################################################
-# ANALYSIS 29: Lifetime Earnings - Eligible Population by Policy
+# ANALYSIS 29-35: LIFETIME EARNINGS ANALYSES
+#
+# These analyses incorporate the NPV calculations from Script 09 to estimate
+# the total economic value contributed by H-1B workers over their careers.
+#
+# LIFETIME EARNINGS VARIABLES:
+# - lifetime_earnings_3pct: NPV of expected lifetime earnings using 3% discount rate
+# - lifetime_earnings_7pct: NPV of expected lifetime earnings using 7% discount rate
+#
+# HOW THEY'RE CALCULATED (from Script 09):
+# For each H-1B worker, we:
+# 1. Look up their age
+# 2. Get the NPV multiplier for that age from ACS data
+# 3. Multiply their current salary by the multiplier
+# Example: 30-year-old earning $100k with 3% multiplier of 31.77
+#          → lifetime earnings = $100k × 31.77 = $3.177 million
+#
+# WHY TWO DISCOUNT RATES?
+# - 3% discount rate: More patient view, values future earnings more highly
+# - 7% discount rate: More impatient view, discounts future earnings more steeply
+# - 3% is closer to historical Treasury rates; 7% is closer to private discount rates
+#
+# KEY INSIGHT:
+# Policies that select younger workers (Experience Benchmarking) will show higher
+# lifetime earnings because younger workers have more earning years ahead. This
+# measures the long-term economic contribution of each policy's selected population.
+#
+# COMPARISON:
+# - Eligible Population (Analysis 29): Average lifetime value of applicants
+# - Weighted Lottery (Analysis 30): Average lifetime value of selected workers
+#   (shows whether weighted lottery selects higher or lower lifetime earners)
 ################################################################################
 
 cat("\n=== Analysis 29: Lifetime Earnings - Eligible Population ===\n")
@@ -1690,7 +2082,7 @@ lifetime_eligible_stats <- h1b_policy %>%
   ) %>%
   pivot_longer(everything(), names_to = "policy", values_to = "data") %>%
   unnest(data) %>%
-  filter(eligible) %>%
+  filter(eligible) %>%  # Only include eligible workers
   group_by(policy) %>%
   summarise(
     median_lifetime_3pct = median(lifetime_3pct, na.rm = TRUE),
@@ -1846,12 +2238,432 @@ p35 <- ggplot(lifetime_lottery_stats, aes(x = policy, y = median_lifetime_7pct))
   theme(axis.text.x = element_text(angle = 20, hjust = 1))
 
 ################################################################################
-# Export PDF
+# ANALYSIS 31: Underpayment by Industry - Eligible Population (Policy Comparison)
+################################################################################
+
+cat("\n=== Analysis 31: Underpayment by Industry - Eligible Population (Policy Comparison) ===\n")
+
+# Calculate underpayment rates by industry for each policy
+industry_underpay_policy <- h1b_policy %>%
+  filter(!is.na(petition_employer_naics)) %>%
+  mutate(
+    industry_label = case_when(
+      !petition_employer_naics %in% top_10_industries ~ "All Other",
+      petition_employer_naics == "541511" ~ "Custom Computer\nProgramming",
+      petition_employer_naics == "541512" ~ "Computer Systems\nDesign",
+      petition_employer_naics == "511210" ~ "Software\nPublishers",
+      petition_employer_naics == "54151" ~ "Computer Systems\nDesign (54151)",
+      petition_employer_naics == "45411" ~ "Electronic\nShopping",
+      petition_employer_naics == "518210" ~ "Data Processing/\nHosting",
+      petition_employer_naics == "541330" ~ "Engineering\nServices",
+      petition_employer_naics == "541519" ~ "Other Computer\nServices",
+      petition_employer_naics == "999999" ~ "Unknown/\nNot Specified",
+      petition_employer_naics == "523110" ~ "Investment\nBanking",
+      TRUE ~ paste0("NAICS ", petition_employer_naics)
+    )
+  ) %>%
+  # Calculate for each policy
+  group_by(industry_label) %>%
+  summarise(
+    # Status Quo
+    n_status_quo = sum(eligible_status_quo, na.rm = TRUE),
+    n_underpaid_status_quo = sum(eligible_status_quo & petition_annual_pay_clean < pw_p50, na.rm = TRUE),
+    pct_underpaid_status_quo = ifelse(n_status_quo > 0, (n_underpaid_status_quo / n_status_quo) * 100, NA),
+
+    # 2021 Rule
+    n_2021 = sum(eligible_2021, na.rm = TRUE),
+    n_underpaid_2021 = sum(eligible_2021 & petition_annual_pay_clean < pw_p50, na.rm = TRUE),
+    pct_underpaid_2021 = ifelse(n_2021 > 0, (n_underpaid_2021 / n_2021) * 100, NA),
+
+    # Experience Benchmarking (always 0%)
+    n_eb = sum(eligible_eb, na.rm = TRUE),
+    pct_underpaid_eb = 0,
+
+    .groups = "drop"
+  ) %>%
+  filter(n_status_quo >= 100) %>%  # Only industries with sufficient sample
+  pivot_longer(
+    cols = c(pct_underpaid_status_quo, pct_underpaid_2021, pct_underpaid_eb),
+    names_to = "policy",
+    values_to = "pct_underpaid"
+  ) %>%
+  mutate(
+    policy = factor(case_when(
+      policy == "pct_underpaid_status_quo" ~ "Status Quo",
+      policy == "pct_underpaid_2021" ~ "2021 Rule",
+      policy == "pct_underpaid_eb" ~ "Experience Benchmarking"
+    ), levels = c("Status Quo", "2021 Rule", "Experience Benchmarking"))
+  )
+
+print(industry_underpay_policy %>% arrange(industry_label, policy))
+
+# Add display column with minimum height for 0% bars (so they're visible)
+# Sort by industry size (n_status_quo) with "All Other" always at bottom (after coord_flip)
+industry_underpay_policy <- industry_underpay_policy %>%
+  mutate(pct_display = pmax(pct_underpaid, 0.5)) %>%  # 0% shows as 0.5% sliver
+  group_by(industry_label) %>%
+  mutate(industry_size = first(n_status_quo)) %>%
+  ungroup() %>%
+  mutate(
+    # Create sort key: "All Other" gets -Inf (first), others by size ascending
+    # After coord_flip: first level = bottom, last level = top
+    sort_order = ifelse(industry_label == "All Other", -Inf, industry_size),
+    industry_label = factor(industry_label,
+                           levels = unique(industry_label[order(sort_order)]))
+  )
+
+p36 <- ggplot(industry_underpay_policy, aes(x = industry_label, y = pct_display, fill = policy)) +
+  geom_col(position = "dodge") +
+  # Add text labels showing actual percentages (whole numbers)
+  geom_text(aes(label = sprintf("%.0f%%", pct_underpaid), y = pct_underpaid),
+            position = position_dodge(width = 0.9),
+            hjust = -0.1, size = 3, color = ifp_colors$rich_black) +
+  scale_fill_manual(values = c(
+    "Status Quo" = ifp_colors$rich_black,
+    "2021 Rule" = ifp_colors$purple,
+    "Experience Benchmarking" = ifp_colors$dark_blue
+  )) +
+  scale_y_continuous(labels = label_percent(scale = 1),
+                     expand = expansion(mult = c(0, 0.15))) +  # More space for labels
+  labs(
+    title = "Eligible Population: Underpayment Rates by Industry and Policy",
+    subtitle = "Percentage of eligible workers paid less than similarly-qualified Americans (0% = no underpayment)",
+    x = NULL,
+    y = "Underpaid (%)",
+    fill = "Policy"
+  ) +
+  coord_flip() +
+  theme_ifp() +
+  theme(legend.position = "bottom")
+
+################################################################################
+# ANALYSIS 32: Underpayment by Industry - Weighted Lottery (Policy Comparison)
+################################################################################
+
+cat("\n=== Analysis 32: Underpayment by Industry - Weighted Lottery (Policy Comparison) ===\n")
+
+# Calculate weighted underpayment rates by industry for each policy
+industry_underpay_lottery <- h1b_lottery %>%
+  filter(!is.na(petition_employer_naics)) %>%
+  mutate(
+    industry_label = case_when(
+      !petition_employer_naics %in% top_10_industries ~ "All Other",
+      petition_employer_naics == "541511" ~ "Custom Computer\nProgramming",
+      petition_employer_naics == "541512" ~ "Computer Systems\nDesign",
+      petition_employer_naics == "511210" ~ "Software\nPublishers",
+      petition_employer_naics == "54151" ~ "Computer Systems\nDesign (54151)",
+      petition_employer_naics == "45411" ~ "Electronic\nShopping",
+      petition_employer_naics == "518210" ~ "Data Processing/\nHosting",
+      petition_employer_naics == "541330" ~ "Engineering\nServices",
+      petition_employer_naics == "541519" ~ "Other Computer\nServices",
+      petition_employer_naics == "999999" ~ "Unknown/\nNot Specified",
+      petition_employer_naics == "523110" ~ "Investment\nBanking",
+      TRUE ~ paste0("NAICS ", petition_employer_naics)
+    ),
+    is_underpaid = petition_annual_pay_clean < pw_p50
+  ) %>%
+  pivot_longer(
+    cols = c(weight_status_quo, weight_2021, weight_eb),
+    names_to = "policy",
+    values_to = "weight"
+  ) %>%
+  filter(weight > 0) %>%
+  mutate(
+    policy = factor(case_when(
+      policy == "weight_status_quo" ~ "Status Quo",
+      policy == "weight_2021" ~ "2021 Rule",
+      policy == "weight_eb" ~ "Experience Benchmarking"
+    ), levels = c("Status Quo", "2021 Rule", "Experience Benchmarking"))
+  )
+
+# Expand by weight and calculate underpayment rates
+industry_underpay_lottery_expanded <- industry_underpay_lottery %>%
+  uncount(weights = weight) %>%
+  group_by(policy, industry_label) %>%
+  summarise(
+    n = n(),
+    n_underpaid = sum(is_underpaid, na.rm = TRUE),
+    pct_underpaid = mean(is_underpaid, na.rm = TRUE) * 100,
+    .groups = "drop"
+  ) %>%
+  filter(n >= 100)  # Only industries with sufficient sample
+
+print(industry_underpay_lottery_expanded %>% arrange(industry_label, policy))
+
+# Add display column with minimum height for 0% bars (so they're visible)
+# Sort by industry size (Status Quo count) with "All Other" always at bottom (after coord_flip)
+industry_underpay_lottery_expanded <- industry_underpay_lottery_expanded %>%
+  mutate(pct_display = pmax(pct_underpaid, 0.5)) %>%  # 0% shows as 0.5% sliver
+  group_by(industry_label) %>%
+  mutate(industry_size = max(n[policy == "Status Quo"], na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(
+    # Create sort key: "All Other" gets -Inf (first), others by size ascending
+    # After coord_flip: first level = bottom, last level = top
+    sort_order = ifelse(industry_label == "All Other", -Inf, industry_size),
+    industry_label = factor(industry_label,
+                           levels = unique(industry_label[order(sort_order)]))
+  )
+
+p37 <- ggplot(industry_underpay_lottery_expanded, aes(x = industry_label, y = pct_display, fill = policy)) +
+  geom_col(position = "dodge") +
+  # Add text labels showing actual percentages (whole numbers)
+  geom_text(aes(label = sprintf("%.0f%%", pct_underpaid), y = pct_underpaid),
+            position = position_dodge(width = 0.9),
+            hjust = -0.1, size = 3, color = ifp_colors$rich_black) +
+  scale_fill_manual(values = c(
+    "Status Quo" = ifp_colors$rich_black,
+    "2021 Rule" = ifp_colors$purple,
+    "Experience Benchmarking" = ifp_colors$dark_blue
+  )) +
+  scale_y_continuous(labels = label_percent(scale = 1),
+                     expand = expansion(mult = c(0, 0.15))) +  # More space for labels
+  labs(
+    title = "Weighted Lottery Simulation: Underpayment Rates by Industry and Policy",
+    subtitle = "Percentage of lottery winners paid less than similarly-qualified Americans (0% = no underpayment)",
+    x = NULL,
+    y = "Underpaid (%)",
+    fill = "Policy"
+  ) +
+  coord_flip() +
+  theme_ifp() +
+  theme(legend.position = "bottom")
+
+################################################################################
+# ANALYSIS 33: Underpayment by Occupation - Eligible Population (Policy Comparison)
+################################################################################
+
+cat("\n=== Analysis 33: Underpayment by Occupation - Eligible Population (Policy Comparison) ===\n")
+
+# Calculate underpayment rates by occupation for each policy
+occupation_underpay_policy <- h1b_policy %>%
+  filter(!is.na(SOC_TITLE)) %>%
+  mutate(
+    occupation_label = if_else(
+      SOC_TITLE %in% top_10_occupations,
+      str_to_title(str_wrap(SOC_TITLE, width = 25)),
+      "All Other"
+    )
+  ) %>%
+  # Calculate for each policy
+  group_by(occupation_label) %>%
+  summarise(
+    # Status Quo
+    n_status_quo = sum(eligible_status_quo, na.rm = TRUE),
+    n_underpaid_status_quo = sum(eligible_status_quo & petition_annual_pay_clean < pw_p50, na.rm = TRUE),
+    pct_underpaid_status_quo = ifelse(n_status_quo > 0, (n_underpaid_status_quo / n_status_quo) * 100, NA),
+
+    # 2021 Rule
+    n_2021 = sum(eligible_2021, na.rm = TRUE),
+    n_underpaid_2021 = sum(eligible_2021 & petition_annual_pay_clean < pw_p50, na.rm = TRUE),
+    pct_underpaid_2021 = ifelse(n_2021 > 0, (n_underpaid_2021 / n_2021) * 100, NA),
+
+    # Experience Benchmarking (always 0%)
+    n_eb = sum(eligible_eb, na.rm = TRUE),
+    pct_underpaid_eb = 0,
+
+    .groups = "drop"
+  ) %>%
+  filter(n_status_quo >= 100) %>%  # Only occupations with sufficient sample
+  pivot_longer(
+    cols = c(pct_underpaid_status_quo, pct_underpaid_2021, pct_underpaid_eb),
+    names_to = "policy",
+    values_to = "pct_underpaid"
+  ) %>%
+  mutate(
+    policy = factor(case_when(
+      policy == "pct_underpaid_status_quo" ~ "Status Quo",
+      policy == "pct_underpaid_2021" ~ "2021 Rule",
+      policy == "pct_underpaid_eb" ~ "Experience Benchmarking"
+    ), levels = c("Status Quo", "2021 Rule", "Experience Benchmarking"))
+  )
+
+print(occupation_underpay_policy %>% arrange(occupation_label, policy))
+
+# Add display column with minimum height for 0% bars (so they're visible)
+# Sort by occupation size (n_status_quo) with "All Other" always at bottom (after coord_flip)
+occupation_underpay_policy <- occupation_underpay_policy %>%
+  mutate(pct_display = pmax(pct_underpaid, 0.5)) %>%  # 0% shows as 0.5% sliver
+  group_by(occupation_label) %>%
+  mutate(occupation_size = first(n_status_quo)) %>%
+  ungroup() %>%
+  mutate(
+    # Create sort key: "All Other" gets -Inf (first), others by size ascending
+    # After coord_flip: first level = bottom, last level = top
+    sort_order = ifelse(occupation_label == "All Other", -Inf, occupation_size),
+    occupation_label = factor(occupation_label,
+                             levels = unique(occupation_label[order(sort_order)]))
+  )
+
+p38 <- ggplot(occupation_underpay_policy, aes(x = occupation_label, y = pct_display, fill = policy)) +
+  geom_col(position = "dodge") +
+  # Add text labels showing actual percentages (whole numbers)
+  geom_text(aes(label = sprintf("%.0f%%", pct_underpaid), y = pct_underpaid),
+            position = position_dodge(width = 0.9),
+            hjust = -0.1, size = 3, color = ifp_colors$rich_black) +
+  scale_fill_manual(values = c(
+    "Status Quo" = ifp_colors$rich_black,
+    "2021 Rule" = ifp_colors$purple,
+    "Experience Benchmarking" = ifp_colors$dark_blue
+  )) +
+  scale_y_continuous(labels = label_percent(scale = 1),
+                     expand = expansion(mult = c(0, 0.15))) +  # More space for labels
+  labs(
+    title = "Eligible Population: Underpayment Rates by Occupation and Policy",
+    subtitle = "Percentage of eligible workers paid less than similarly-qualified Americans (0% = no underpayment)",
+    x = NULL,
+    y = "Underpaid (%)",
+    fill = "Policy"
+  ) +
+  coord_flip() +
+  theme_ifp() +
+  theme(legend.position = "bottom")
+
+################################################################################
+# ANALYSIS 34: Underpayment by Occupation - Weighted Lottery (Policy Comparison)
+################################################################################
+
+cat("\n=== Analysis 34: Underpayment by Occupation - Weighted Lottery (Policy Comparison) ===\n")
+
+# Calculate weighted underpayment rates by occupation for each policy
+occupation_underpay_lottery <- h1b_lottery %>%
+  filter(!is.na(SOC_TITLE)) %>%
+  mutate(
+    occupation_label = if_else(
+      SOC_TITLE %in% top_10_occupations,
+      str_to_title(str_wrap(SOC_TITLE, width = 25)),
+      "All Other"
+    ),
+    is_underpaid = petition_annual_pay_clean < pw_p50
+  ) %>%
+  pivot_longer(
+    cols = c(weight_status_quo, weight_2021, weight_eb),
+    names_to = "policy",
+    values_to = "weight"
+  ) %>%
+  filter(weight > 0) %>%
+  mutate(
+    policy = factor(case_when(
+      policy == "weight_status_quo" ~ "Status Quo",
+      policy == "weight_2021" ~ "2021 Rule",
+      policy == "weight_eb" ~ "Experience Benchmarking"
+    ), levels = c("Status Quo", "2021 Rule", "Experience Benchmarking"))
+  )
+
+# Expand by weight and calculate underpayment rates
+occupation_underpay_lottery_expanded <- occupation_underpay_lottery %>%
+  uncount(weights = weight) %>%
+  group_by(policy, occupation_label) %>%
+  summarise(
+    n = n(),
+    n_underpaid = sum(is_underpaid, na.rm = TRUE),
+    pct_underpaid = mean(is_underpaid, na.rm = TRUE) * 100,
+    .groups = "drop"
+  ) %>%
+  filter(n >= 100)  # Only occupations with sufficient sample
+
+print(occupation_underpay_lottery_expanded %>% arrange(occupation_label, policy))
+
+# Add display column with minimum height for 0% bars (so they're visible)
+# Sort by occupation size (Status Quo count) with "All Other" always at bottom (after coord_flip)
+occupation_underpay_lottery_expanded <- occupation_underpay_lottery_expanded %>%
+  mutate(pct_display = pmax(pct_underpaid, 0.5)) %>%  # 0% shows as 0.5% sliver
+  group_by(occupation_label) %>%
+  mutate(occupation_size = max(n[policy == "Status Quo"], na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(
+    # Create sort key: "All Other" gets -Inf (first), others by size ascending
+    # After coord_flip: first level = bottom, last level = top
+    sort_order = ifelse(occupation_label == "All Other", -Inf, occupation_size),
+    occupation_label = factor(occupation_label,
+                             levels = unique(occupation_label[order(sort_order)]))
+  )
+
+p39 <- ggplot(occupation_underpay_lottery_expanded, aes(x = occupation_label, y = pct_display, fill = policy)) +
+  geom_col(position = "dodge") +
+  # Add text labels showing actual percentages (whole numbers)
+  geom_text(aes(label = sprintf("%.0f%%", pct_underpaid), y = pct_underpaid),
+            position = position_dodge(width = 0.9),
+            hjust = -0.1, size = 3, color = ifp_colors$rich_black) +
+  scale_fill_manual(values = c(
+    "Status Quo" = ifp_colors$rich_black,
+    "2021 Rule" = ifp_colors$purple,
+    "Experience Benchmarking" = ifp_colors$dark_blue
+  )) +
+  scale_y_continuous(labels = label_percent(scale = 1),
+                     expand = expansion(mult = c(0, 0.15))) +  # More space for labels
+  labs(
+    title = "Weighted Lottery Simulation: Underpayment Rates by Occupation and Policy",
+    subtitle = "Percentage of lottery winners paid less than similarly-qualified Americans (0% = no underpayment)",
+    x = NULL,
+    y = "Underpaid (%)",
+    fill = "Policy"
+  ) +
+  coord_flip() +
+  theme_ifp() +
+  theme(legend.position = "bottom")
+
+################################################################################
+# PDF EXPORT
+#
+# This section compiles all 39 analyses into a single PDF report.
+#
+# PDF STRUCTURE:
+#
+# PAGE 1: OVERALL SUMMARY
+#   - Headline underpayment statistics and wage premium
+#
+# PAGES 2-3: SCATTERPLOTS
+#   - Page 2: Salary vs wage premium (all data, blue dots)
+#   - Page 3: Salary vs wage premium colored by 2021 Rule eligibility (green/red)
+#
+# PAGES 4-16: ELIGIBLE POPULATION ANALYSES
+#   These show characteristics of workers who can apply under each policy
+#   - Pages 4-6: Underpayment rates by age (cohorts and 5-year groups)
+#   - Pages 7-12: Policy comparison (underpayment rates, wage premiums, by $/%)
+#   - Pages 13-14: Salary trends by year and policy (median and mean)
+#   - Pages 15-16: Age distribution and PhD share by policy
+#
+# PAGES 17-24: WEIGHTED LOTTERY SIMULATION ANALYSES
+#   These show characteristics of workers who would be selected under weighted lottery
+#   (simulation where higher-paid workers get more lottery entries)
+#   - Pages 17-18: Salary trends by year (median and mean, weighted)
+#   - Page 19: Age distribution (weighted)
+#   - Pages 20-21: Wage premium by year ($/%, weighted)
+#   - Pages 22-23: PhD share and F-1 status share (weighted)
+#   - Page 24: Underpayment share (weighted)
+#
+# PAGES 25-30: INDUSTRY AND OCCUPATION COMPOSITION
+#   - Page 25: Underpayment rates by top 10 industries
+#   - Page 26: Underpayment rates by top 10 occupations
+#   - Page 27: Industry mix by policy (eligible population)
+#   - Page 28: Industry mix by policy (weighted lottery)
+#   - Page 29: Occupation mix by policy (eligible population)
+#   - Page 30: Occupation mix by policy (weighted lottery)
+#
+# PAGES 31-36: LIFETIME EARNINGS ANALYSES
+#   Using NPV multipliers from Script 09 to estimate total career value
+#   - Pages 31-33: Eligible population (median/mean at 3%, median at 7%)
+#   - Pages 34-36: Weighted lottery (median/mean at 3%, median at 7%)
+#
+# PAGES 37-40: POLICY COMPARISON BY INDUSTRY/OCCUPATION
+#   - Page 37: Underpayment rates by industry across policies (eligible)
+#   - Page 38: Underpayment rates by industry across policies (weighted lottery)
+#   - Page 39: Underpayment rates by occupation across policies (eligible)
+#   - Page 40: Underpayment rates by occupation across policies (weighted lottery)
+#
+# PDF FORMAT:
+# - Landscape orientation (11" × 8.5")
+# - IFP brand colors and styling throughout
+# - Each page is self-contained with title and subtitle
+#
+# USAGE:
+# Open output/analysis/economic_analysis.pdf to review all analyses
 ################################################################################
 
 cat("\n=== Exporting PDF ===\n")
 
-pdf("output/analysis/economic_analysis.pdf", width = 11, height = 8.5)
+pdf("output/analysis/economic_analysis.pdf", width = 11, height = 8.5)  # Landscape orientation
 
 # Page 1: Overall stats
 print(p1)
@@ -1859,111 +2671,129 @@ print(p1)
 # Page 2: Scatterplot
 print(p2)
 
-# Page 3: Underpayment by age cohort (20-29, 30-39, 40-49, 50-59)
+# Page 3: Scatterplot colored by 2021 Rule eligibility
+print(p2a)
+
+# Page 4: Underpayment by age cohort (20-29, 30-39, 40-49, 50-59)
 print(p3)
 
-# Page 4: Underpayment by 5-year age group
+# Page 5: Underpayment by 5-year age group
 print(p4)
 
-# Page 5: Premium by 5-year age group
+# Page 6: Premium by 5-year age group
 print(p5)
 
-# Page 6: Policy comparison bar chart
+# Page 7: Policy comparison bar chart
 print(p6)
 
-# Page 7: Policy comparison table
+# Page 8: Policy comparison table
 print(p7)
 
-# Page 8: Median underpayment ($) among underpaid by policy
+# Page 9: Median underpayment ($) among underpaid by policy
 print(p8)
 
-# Page 9: Median underpayment (%) among underpaid by policy
+# Page 10: Median underpayment (%) among underpaid by policy
 print(p9)
 
-# Page 10: Median wage premium ($) among eligible by policy
+# Page 11: Median wage premium ($) among eligible by policy
 print(p10)
 
-# Page 11: Median wage premium (%) among eligible by policy
+# Page 12: Median wage premium (%) among eligible by policy
 print(p11)
 
-# Page 12: Median salary by year and policy
+# Page 13: Median salary by year and policy
 print(p12)
 
-# Page 13: Mean salary by year and policy
+# Page 14: Mean salary by year and policy
 print(p13)
 
-# Page 14: Eligible population - age distribution by policy
+# Page 15: Eligible population - age distribution by policy
 print(p14)
 
-# Page 15: Eligible population - PhD share by policy
+# Page 16: Eligible population - PhD share by policy
 print(p15)
 
-# Page 16: Weighted lottery - median salary by year
+# Page 17: Weighted lottery - median salary by year
 print(p16)
 
-# Page 17: Weighted lottery - mean salary by year
+# Page 18: Weighted lottery - mean salary by year
 print(p17)
 
-# Page 18: Weighted lottery - age distribution
+# Page 19: Weighted lottery - age distribution
 print(p18)
 
-# Page 19: Weighted lottery - median wage premium ($) by year
+# Page 20: Weighted lottery - median wage premium ($) by year
 print(p19)
 
-# Page 20: Weighted lottery - median wage premium (%) by year
+# Page 21: Weighted lottery - median wage premium (%) by year
 print(p20)
 
-# Page 21: Weighted lottery - PhD share
+# Page 22: Weighted lottery - PhD share
 print(p21)
 
-# Page 22: Weighted lottery - share with prior F-1 status
+# Page 23: Weighted lottery - share with prior F-1 status
 print(p22)
 
-# Page 23: Weighted lottery - share underpaid
+# Page 24: Weighted lottery - share underpaid
 print(p23)
 
-# Page 24: Underpayment by top 10 industries (eligible population)
+# Page 25: Underpayment by top 10 industries (eligible population)
 print(p24)
 
-# Page 25: Underpayment by top 10 occupations (eligible population)
+# Page 26: Underpayment by top 10 occupations (eligible population)
 print(p25)
 
-# Page 26: Industry mix - eligible population
+# Page 27: Industry mix - eligible population
 print(p26)
 
-# Page 27: Industry mix - weighted lottery
+# Page 28: Industry mix - weighted lottery
 print(p27)
 
-# Page 28: Occupation mix - eligible population
+# Page 29: Occupation mix - eligible population
 print(p28)
 
-# Page 29: Occupation mix - weighted lottery
+# Page 30: Occupation mix - weighted lottery
 print(p29)
 
-# Page 30: Median lifetime earnings - eligible population (3% discount)
+# Page 31: Median lifetime earnings - eligible population (3% discount)
 print(p30)
 
-# Page 31: Mean lifetime earnings - eligible population (3% discount)
+# Page 32: Mean lifetime earnings - eligible population (3% discount)
 print(p31)
 
-# Page 32: Median lifetime earnings - eligible population (7% discount)
+# Page 33: Median lifetime earnings - eligible population (7% discount)
 print(p32)
 
-# Page 33: Median lifetime earnings - weighted lottery (3% discount)
+# Page 34: Median lifetime earnings - weighted lottery (3% discount)
 print(p33)
 
-# Page 34: Mean lifetime earnings - weighted lottery (3% discount)
+# Page 35: Mean lifetime earnings - weighted lottery (3% discount)
 print(p34)
 
-# Page 35: Median lifetime earnings - weighted lottery (7% discount)
+# Page 36: Median lifetime earnings - weighted lottery (7% discount)
 print(p35)
+
+# Page 37: Underpayment by industry - eligible population (policy comparison)
+print(p36)
+
+# Page 38: Underpayment by industry - weighted lottery (policy comparison)
+print(p37)
+
+# Page 39: Underpayment by occupation - eligible population (policy comparison)
+print(p38)
+
+# Page 40: Underpayment by occupation - weighted lottery (policy comparison)
+print(p39)
 
 dev.off()
 
 cat("\n=== Analysis Complete ===\n")
 cat("Output saved to: output/analysis/economic_analysis.pdf\n")
-cat("Total pages: 35\n")
-cat("\nPages 1-15: Eligible Population Analyses\n")
-cat("Pages 16-23: Weighted Lottery Simulation Analyses\n")
-cat("Pages 24-29: Industry and Occupation Analyses\n")
-cat("Pages 30-35: Lifetime Earnings Analyses\n")
+cat("Total pages: 40\n")
+cat("\nPage 1: Overall Summary\n")
+cat("Pages 2-3: Scatterplots (Salary vs Wage Premium)\n")
+cat("Pages 4-16: Eligible Population Analyses\n")
+cat("Pages 17-24: Weighted Lottery Simulation Analyses\n")
+cat("Pages 25-30: Industry and Occupation Analyses\n")
+cat("Pages 31-36: Lifetime Earnings Analyses\n")
+cat("Pages 37-40: Underpayment by Industry/Occupation (Policy Comparisons)\n")
