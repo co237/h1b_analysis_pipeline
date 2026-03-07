@@ -42,9 +42,6 @@
 #      → SOC_CODE_clean (specific, with XX) matches OFLC wages
 #      → ACS_OCCSOC (aggregated, with YY) matches Mincer ratios
 #
-# For detailed explanation of the methodology, see:
-#   MINCER_METHODOLOGY.md
-#
 # =============================================================================
 
 # Load configuration

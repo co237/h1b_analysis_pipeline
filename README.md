@@ -53,7 +53,6 @@ This project reconstructs the universe of H-1B petitions filed in FY 2022-2024 a
 ```
 h1b_analysis_pipeline/
 ├── README.md                       # This file
-├── MINCER_METHODOLOGY.md           # Detailed methodology documentation
 ├── DATA_SOURCES.md                 # Data download instructions
 ├── config.R                        # Central configuration
 ├── run_all.R                       # Master execution script
@@ -371,11 +370,9 @@ The pipeline supports simulation of different wage threshold scenarios:
 - **Status Quo (17th, 34th, 50th, 67th)**: Current OFLC system
 - **2021 Rule (35th, 53rd, 72nd, 90th)**: Proposed DOL reform thresholds
 
-## Detailed Methodology Documentation
+## Data Sources
 
-For detailed technical documentation, see:
-- **`MINCER_METHODOLOGY.md`**: Complete explanation of Mincer estimation, crosswalk system, and wage calculation
-- **`DATA_SOURCES.md`**: Data download instructions and file structure
+For data download instructions and file structure, see **`DATA_SOURCES.md`**
 
 ## System Requirements
 
