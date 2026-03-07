@@ -783,7 +783,7 @@ gc()
 # =============================================================================
 #
 # For fast interactive wage queries, use the standalone script:
-#   source("lookup_wages.R")
+#   source("scripts/lookup_wages.R")
 #
 # This loads pre-computed data in ~1-2 seconds (no model fitting needed)
 # and provides instant wage queries via get_prevailing_wages()
@@ -792,6 +792,6 @@ gc()
 
 cat("\n=============================================================================\n")
 cat("For interactive wage lookup, use:\n")
-cat("  source('lookup_wages.R')\n")
+cat("  source('scripts/lookup_wages.R')\n")
 cat("  result <- get_prevailing_wages(soc, education, experience, msa, year, type)\n")
 cat("=============================================================================\n\n")

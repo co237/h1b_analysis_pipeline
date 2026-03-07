@@ -67,13 +67,14 @@ cat("===========================================================================
 cat("Loading wage calculation function and data...\n")
 
 # Load the main lookup function
-if (file.exists("lookup_wages.R")) {
-  suppressMessages(source("lookup_wages.R", echo = FALSE))
-} else if (file.exists("../lookup_wages.R")) {
-  suppressMessages(source("../lookup_wages.R", echo = FALSE))
+script_dir <- dirname(sys.frame(1)$ofile)
+if (file.exists(file.path(script_dir, "lookup_wages.R"))) {
+  suppressMessages(source(file.path(script_dir, "lookup_wages.R"), echo = FALSE))
+} else if (file.exists("scripts/lookup_wages.R")) {
+  suppressMessages(source("scripts/lookup_wages.R", echo = FALSE))
 } else {
-  stop("\nERROR: Cannot find lookup_wages.R\n",
-       "Please make sure you're running this script from the project root or scripts directory.")
+  stop("\nERROR: Cannot find lookup_wages.R in scripts/ directory\n",
+       "Please make sure lookup_wages.R exists in the scripts/ directory.")
 }
 
 # =============================================================================
@@ -221,6 +222,6 @@ if (result$status == "success") {
   cat("  2. Run the entire script again\n\n")
 
   cat("For programmatic access, use:\n")
-  cat("  source('lookup_wages.R')\n")
+  cat("  source('scripts/lookup_wages.R')\n")
   cat("  result <- get_prevailing_wages(soc_code, education, experience, msa, year, type)\n\n")
 }

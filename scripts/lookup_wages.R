@@ -8,7 +8,7 @@
 # PREREQUISITE: Run Script 04 first to generate the data files
 #
 # USAGE:
-#   source("lookup_wages.R")  # Takes ~1-2 seconds
+#   source("scripts/lookup_wages.R")  # Takes ~1-2 seconds
 #   result <- get_prevailing_wages("15-1252", "Bachelors", 5, "41860", 2023, "ALC")
 #
 # =============================================================================

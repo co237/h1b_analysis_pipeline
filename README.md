@@ -57,7 +57,7 @@ h1b_analysis_pipeline/
 ├── DATA_SOURCES.md                 # Data download instructions
 ├── config.R                        # Central configuration
 ├── run_all.R                       # Master execution script
-├── lookup_wages.R                  # Fast wage lookup function
+├── setup.R                         # First-time setup (install packages, create directories)
 │
 ├── scripts/                        # Analysis scripts (run in order 01-08)
 │   ├── 01_data_cleaning.R          # Clean and merge FOIA + LCA data
@@ -67,7 +67,8 @@ h1b_analysis_pipeline/
 │   ├── 05 Apply new PWs to H1B petitions.R # Apply wages to petitions
 │   ├── 06 nprm_simulation.R        # Simulate NPRM policy effects
 │   ├── 07 interactive wage lookup.R # User-friendly wage calculator
-│   └── 08 economic analysis.R      # Generate policy comparison analysis
+│   ├── 08 economic analysis.R      # Generate policy comparison analysis
+│   └── lookup_wages.R              # Fast programmatic wage lookup function
 │
 ├── docs/
 │   └── data_directories/           # Documentation for data folders
@@ -209,7 +210,7 @@ User-friendly calculator for Experience Benchmarking prevailing wages. Simply ed
 - Comparison to typical worker (e.g., "earns 21.4% less than typical worker")
 - Percentile scaling factors
 
-**For Programmatic Use:** Use `lookup_wages.R` directly (see next section)
+**For Programmatic Use:** Use `scripts/lookup_wages.R` directly (see next section)
 
 ### Step 8: Economic Analysis (Script 08)
 **Runtime:** ~2-3 minutes
@@ -246,13 +247,13 @@ Best for **occasional lookups** in RStudio:
 
 See [Step 7](#step-7-interactive-wage-lookup-script-07) above for details.
 
-### Option 2: Programmatic Function (lookup_wages.R)
+### Option 2: Programmatic Function (scripts/lookup_wages.R)
 
 Best for **batch queries** or **integration** into other code:
 
 ```r
 # Load the function and data (fast - ~2 seconds)
-source("lookup_wages.R")
+source("scripts/lookup_wages.R")
 
 # Query a specific scenario
 result <- get_prevailing_wages(
