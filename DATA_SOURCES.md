@@ -1,310 +1,200 @@
-# Data Sources and Download Instructions
+# Data Sources and Setup
 
-This document provides detailed instructions for obtaining all required data files for the DOL NPRM H-1B wage analysis pipeline.
+This document explains where to get the data files needed to run this analysis pipeline.
 
 ## Quick Start
 
-**Option 1: Use Google Drive (Recommended)**
-- Contact connor@ifp.org for access to the shared `h1b_analysis_pipeline_data` folder (~8.2 GB)
-- All data files are pre-organized and ready to use
-- See `DATA_GOOGLE_DRIVE.md` for setup instructions
+**Option 1: Download from Google Drive (Recommended)**
+
+All required data files (~8.2 GB) are available in a shared Google Drive folder:
+
+**📁 [View Data Files (Google Drive)](https://drive.google.com/drive/folders/1aVy2dc0HcIAsJ1e5ZavvCqASTYW6o9l8?usp=sharing)**
+
+The folder contains:
+- `raw/` - Source data files
+- `intermediate/` - Processed intermediate files
+- `processed/` - Final processed datasets
+- `output/` - Analysis results
+
+**Setup:**
+1. Clone this repository: `git clone https://github.com/yourusername/h1b_analysis_pipeline.git`
+2. Download the `raw/`, `intermediate/`, and `processed/` folders from Google Drive
+3. Place them in your local `h1b_analysis_pipeline/data/` directory
+4. Run `source("setup.R")` to verify files are in place
 
 **Option 2: Download Files Yourself**
-- Follow the instructions below to download each required file
-- This will take several hours but ensures you have the latest data
 
-## Directory Structure
+If you prefer to download files from original sources, follow the instructions below.
 
-Place all downloaded files in the `data/raw/` directory according to this structure:
-
-```
-data/raw/
-├── FOIA Data/
-│   ├── TRK_13139_FY2021.csv
-│   ├── TRK_13139_FY2022.csv
-│   ├── TRK_13139_FY2023.csv
-│   ├── TRK_13139_FY2024_single_reg.csv
-│   └── TRK_13139_FY2024_multi_reg.csv
-│
-├── LCA_Data/
-│   ├── LCA_Disclosure_Data_FY2020_Q1.xlsx
-│   ├── LCA_Disclosure_Data_FY2020_Q2.xlsx
-│   ├── ... (additional quarterly files)
-│   └── H-1B_Disclosure_Data_FY2019.xlsx
-│
-├── OFLC_Wages_2024-25/
-│   ├── ALC_Export_FY2020.csv
-│   ├── ALC_Export_FY2021.csv
-│   ├── ALC_Export_FY2022.csv
-│   └── ALC_Export_FY2023.csv
-│
-├── Other Data/
-│   ├── ZIP_COUNTY_122024.xlsx
-│   ├── ZIP_CBSA_122024.xlsx
-│   ├── area_definitions_m2023.xlsx
-│   ├── soc_2010_to_2018_crosswalk.xlsx
-│   └── DOT_to_ONET_SOC.xlsx
-│
-├── usa_00068.xml (or your IPUMS extract filename)
-├── usa_00068.dat.gz (or your IPUMS extract filename)
-└── soc_2018_definitions.xlsx
-```
+---
 
 ## Required Data Files
 
 ### 1. H-1B FOIA Petition Data
 
-**What:** Detailed H-1B lottery registration and petition data for fiscal years 2021-2024
+**Source:** Bloomberg Graphics
+**Link:** https://github.com/BloombergGraphics/2024-h1b-immigration-data/releases
 
-**Source:** Bloomberg Graphics H-1B Immigration Data
-- **GitHub Repository:** https://github.com/BloombergGraphics/2024-h1b-immigration-data
-- **Direct Download:** https://github.com/BloombergGraphics/2024-h1b-immigration-data/releases
+**Files:**
+- `TRK_13139_FY2021.csv`
+- `TRK_13139_FY2022.csv`
+- `TRK_13139_FY2023.csv`
+- `TRK_13139_FY2024_single_reg.csv`
+- `TRK_13139_FY2024_multi_reg.csv`
 
-**Files Needed:**
-- `TRK_13139_FY2021.csv` (~1.2 GB)
-- `TRK_13139_FY2022.csv` (~1.1 GB)
-- `TRK_13139_FY2023.csv` (~1.3 GB)
-- `TRK_13139_FY2024_single_reg.csv` (~1.0 GB)
-- `TRK_13139_FY2024_multi_reg.csv` (~300 MB)
-
-**Where to Place:** `data/raw/FOIA Data/`
-
-**Instructions:**
-1. Visit the GitHub releases page
-2. Download all five CSV files
-3. Place them in `data/raw/FOIA Data/`
+**Place in:** `data/raw/FOIA_Data/`
 
 ---
 
 ### 2. Labor Condition Application (LCA) Data
 
-**What:** Department of Labor LCA disclosure data containing wage and job information
+**Source:** Department of Labor OFLC
+**Link:** https://www.dol.gov/agencies/eta/foreign-labor/performance → "Disclosure Data" → "LCA Programs"
 
-**Source:** DOL Office of Foreign Labor Certification (OFLC)
-- **Website:** https://www.dol.gov/agencies/eta/foreign-labor/performance
-- **Direct Link:** Click "Disclosure Data" tab, then "LCA Programs (H-1B, H-1B1, E-3)"
+**Files needed:**
+- Quarterly LCA files for FY 2020-2024
+- Annual files for FY 2015-2019
 
-**Files Needed:**
-- **FY 2020-2024:** Quarterly files (e.g., `LCA_Disclosure_Data_FY2020_Q1.xlsx`)
-- **FY 2015-2019:** Annual files (e.g., `H-1B_Disclosure_Data_FY2019.xlsx`)
-
-**Where to Place:** `data/raw/LCA_Data/`
-
-**Instructions:**
-1. Visit the OFLC Performance Data page
-2. Navigate to "Disclosure Data" → "LCA Programs"
-3. Download quarterly files for FY 2020-2024
-4. Download annual files for FY 2015-2019
-5. Place all files in `data/raw/LCA_Data/`
-
-**Note:** These are large Excel files (~50-200 MB each). The total size for all LCA files is ~4 GB.
+**Place in:** `data/raw/LCA_Data/`
 
 ---
 
-### 3. ACS Microdata (IPUMS USA)
-
-**What:** American Community Survey microdata for years 2021-2023 containing individual-level wage and demographic data
+### 3. American Community Survey (ACS) Microdata
 
 **Source:** IPUMS USA
-- **Website:** https://usa.ipums.org/
-- **Registration Required:** Free account needed
+**Link:** https://usa.ipums.org/
 
-**Required Variables:**
-- **Core:** `YEAR`, `AGE`, `CITIZEN`, `INCWAGE`, `EMPSTAT`, `PERWT`
-- **Education:** `EDUCD`
-- **Occupation:** `OCCSOC`
-- **Geography:** `PUMA` (**CRITICAL** - required for geographic controls)
-- **Other:** `STATEFIP`, `COUNTYFIP` (optional but helpful)
-
-**Years:** 2021, 2022, 2023 ACS
-
-**Sample:** 1% or higher (5% recommended for sufficient cell sizes)
-
-**Where to Place:** `data/raw/`
+**Required:**
+- Years: 2019, 2021, 2022, 2023
+- Sample: 1% or higher
+- **Critical variables:** YEAR, AGE, CITIZEN, INCWAGE, EMPSTAT, PERWT, EDUCD, OCCSOC, PUMA, STATEFIP, MET2013
 
 **Instructions:**
-1. Create a free account at https://usa.ipums.org/
-2. Click "Get Data"
-3. Select samples: 2021 ACS, 2022 ACS, 2023 ACS
-4. Select variables (see list above)
-5. **IMPORTANT:** Make sure to include `PUMA` variable
-6. Select data format: Fixed-width text (.dat) with DDI codebook (.xml)
-7. Submit extract request
-8. Wait for email notification (can take 30 minutes to several hours)
-9. Download two files:
-   - DDI codebook (`.xml` file)
-   - Data file (`.dat.gz` file)
-10. Place both files in `data/raw/`
-11. Update `config.R` line 76 with your actual filenames if different from `usa_00068.xml`
+1. Create free account at https://usa.ipums.org/
+2. Click "Get Data" and select years 2019, 2021, 2022, 2023
+3. Add all required variables (especially PUMA and MET2013)
+4. Select format: Fixed-width text (.dat) with DDI codebook (.xml)
+5. Submit extract and wait for email notification
+6. Download both .xml and .dat.gz files
 
-**File Size:** ~3-5 GB compressed, ~10-15 GB uncompressed
+**Place in:** `data/raw/`
 
-**Note:** The filename will depend on your extract number (e.g., `usa_00068.xml` or `usa_00123.xml`)
+**Update config.R** with your actual filename (e.g., `usa_00068.xml`)
 
 ---
 
-### 4. SOC Code Definitions
+### 4. OFLC Prevailing Wage Data
 
-**What:** Standard Occupational Classification (SOC) 2018 code definitions
+**Source:** Department of Labor OFLC
+**Link:** https://www.dol.gov/agencies/eta/foreign-labor/performance
 
-**Source:** Bureau of Labor Statistics (BLS)
-- **Website:** https://www.bls.gov/soc/
-- **Direct Link:** https://www.bls.gov/soc/2018/soc_2018_definitions.xlsx
+**Files needed:**
+- `ALC_Export_FY2021.csv`
+- `ALC_Export_FY2022.csv`
+- `ALC_Export_FY2023.csv`
+- `ALC_Export_FY2024.csv`
+- `ALC_Export_FY2025.csv`
+- `ALC_Export_FY2026.csv`
 
-**File Needed:** `soc_2018_definitions.xlsx`
-
-**Where to Place:** `data/raw/`
-
-**Instructions:**
-1. Visit https://www.bls.gov/soc/2018/
-2. Download "2018 SOC Definitions" Excel file
-3. Save as `soc_2018_definitions.xlsx` in `data/raw/`
+**Place in:** `data/raw/OFLC_Wages/`
 
 ---
 
 ### 5. Geographic Crosswalks
 
-**What:** Crosswalk files mapping ZIP codes to counties and MSAs
+**HUD ZIP Code Crosswalks**
+Link: https://www.huduser.gov/portal/datasets/usps_crosswalk.html
 
-**Sources:**
+Files:
+- `ZIP_COUNTY_122024.xlsx`
+- `ZIP_CBSA_122024.xlsx`
 
-#### a) HUD ZIP Code Crosswalk Files
-- **Website:** https://www.huduser.gov/portal/datasets/usps_crosswalk.html
-- **Files:**
-  - `ZIP_COUNTY_122024.xlsx` - ZIP to County
-  - `ZIP_CBSA_122024.xlsx` - ZIP to CBSA/MSA
+**BLS MSA Definitions**
+Link: https://www.bls.gov/oes/current/msa_def.htm
 
-**Instructions:**
-1. Visit HUD USPS ZIP Code Crosswalk page
-2. Download "ZIP-COUNTY" for Q4 2024 (or latest quarter)
-3. Download "ZIP-CBSA" for Q4 2024 (or latest quarter)
-4. Place in `data/raw/Other Data/`
+Files:
+- `area_definitions_m2023.xlsx`
 
-#### b) BLS MSA Definitions
-- **Website:** https://www.bls.gov/oes/current/msa_def.htm
-- **File:** `area_definitions_m2023.xlsx`
-
-**Instructions:**
-1. Visit BLS OES MSA Definitions page
-2. Download "Area Definitions" Excel file for 2023 (or latest)
-3. Save as `area_definitions_m2023.xlsx` in `data/raw/Other Data/`
-
-**Where to Place:** `data/raw/Other Data/`
+**Place in:** `data/raw/Other_Data/`
 
 ---
 
-### 6. Occupation Code Crosswalks
+### 6. Occupation Code Files
 
-**What:** Crosswalks for mapping between different occupation coding systems
+**SOC 2018 Definitions**
+Link: https://www.bls.gov/soc/2018/soc_2018_definitions.xlsx
 
-**Source:** Bureau of Labor Statistics
+**SOC 2010 to 2018 Crosswalk**
+Link: https://www.bls.gov/soc/2018/ (find "SOC 2010 to SOC 2018 Crosswalk")
 
-#### a) SOC 2010 to 2018 Crosswalk
-- **Website:** https://www.bls.gov/soc/2018/
-- **File:** `soc_2010_to_2018_crosswalk.xlsx`
-
-**Instructions:**
-1. Visit https://www.bls.gov/soc/2018/
-2. Find "SOC 2010 to SOC 2018 Crosswalk"
-3. Download Excel file
-4. Save as `soc_2010_to_2018_crosswalk.xlsx`
-
-#### b) DOT to SOC Crosswalk
-- **Website:** https://www.bls.gov/soc/
-- **File:** `DOT_to_ONET_SOC.xlsx`
-
-**Instructions:**
-1. Visit BLS SOC page
-2. Find "Dictionary of Occupational Titles (DOT) to SOC" crosswalk
-3. Download Excel file
-4. Save as `DOT_to_ONET_SOC.xlsx`
-
-**Where to Place:** `data/raw/Other Data/`
+**Place in:** `data/raw/`
 
 ---
 
-### 7. OFLC Wage Level Data (Optional)
+## Directory Structure
 
-**What:** OFLC prevailing wage determination data used for wage level analysis
+After downloading all files, your directory should look like this:
 
-**Source:** DOL OFLC Performance Data
-- **Website:** https://www.dol.gov/agencies/eta/foreign-labor/performance
-- **Section:** "Prevailing Wage Determinations" or "Online Wage Library"
-
-**Files Needed:**
-- `ALC_Export_FY2020.csv`
-- `ALC_Export_FY2021.csv`
-- `ALC_Export_FY2022.csv`
-- `ALC_Export_FY2023.csv`
-
-**Where to Place:** `data/raw/OFLC_Wages_2024-25/`
-
-**Instructions:**
-1. Visit OFLC Performance Data page
-2. Navigate to "Prevailing Wage Determinations"
-3. Download wage data exports for FY 2020-2023
-4. Place in `data/raw/OFLC_Wages_2024-25/`
-
-**Note:** This data is optional. The pipeline can run without it, but some wage level comparisons may be limited.
-
----
-
-## Auto-Downloaded Data
-
-The following data files are automatically downloaded by the pipeline scripts:
-
-- **Census ZCTA to PUMA Crosswalks** (2020 and 2010)
-- **Census PUMA Relationship Files**
-
-These will be downloaded to `data/raw/census_crosswalks/` when you run the geocoding script.
-
----
-
-## Verifying Your Setup
-
-After downloading all files, run the setup script to verify everything is in place:
-
-```r
-source('setup.R')
+```
+data/
+├── raw/
+│   ├── FOIA_Data/
+│   │   ├── TRK_13139_FY2021.csv
+│   │   ├── TRK_13139_FY2022.csv
+│   │   ├── TRK_13139_FY2023.csv
+│   │   ├── TRK_13139_FY2024_single_reg.csv
+│   │   └── TRK_13139_FY2024_multi_reg.csv
+│   ├── LCA_Data/
+│   │   └── [Quarterly and annual LCA files]
+│   ├── OFLC_Wages/
+│   │   ├── ALC_Export_FY2021.csv
+│   │   ├── ALC_Export_FY2022.csv
+│   │   ├── ALC_Export_FY2023.csv
+│   │   ├── ALC_Export_FY2024.csv
+│   │   ├── ALC_Export_FY2025.csv
+│   │   └── ALC_Export_FY2026.csv
+│   ├── Other_Data/
+│   │   ├── ZIP_COUNTY_122024.xlsx
+│   │   ├── ZIP_CBSA_122024.xlsx
+│   │   └── area_definitions_m2023.xlsx
+│   ├── usa_00068.xml
+│   ├── usa_00068.dat.gz
+│   ├── soc_2018_definitions.xlsx
+│   └── soc_2010_to_2018_crosswalk.xlsx
+│
+├── intermediate/
+│   └── [Generated by pipeline scripts]
+│
+└── processed/
+    └── [Generated by pipeline scripts]
 ```
 
-This will:
-- Check for all required data files
-- Report which files are missing
-- Guide you on next steps
-
 ---
 
-## File Size Summary
+## File Size Requirements
 
 Total data size: **~8-10 GB**
 
 Breakdown:
 - H-1B FOIA Data: ~5 GB
 - LCA Data: ~4 GB
-- ACS IPUMS Data: ~3-5 GB (compressed)
-- Other files: ~50-100 MB
+- ACS IPUMS Data: ~3-5 GB
+- OFLC Wages: ~500 MB
+- Other files: ~100 MB
 
-Make sure you have sufficient disk space before downloading.
+Ensure you have at least **20 GB free disk space** before starting.
 
 ---
 
-## Troubleshooting
+## Verify Setup
 
-### IPUMS Extract Taking Too Long
-IPUMS extracts can take 30 minutes to several hours depending on server load. Be patient and check your email for the notification.
+After downloading all files, verify your setup:
 
-### Files Have Different Names
-If your files have different names (especially IPUMS files), you'll need to update `config.R` to reflect the actual filenames. Look for these variables:
-- `acs_ddi_file` (line 76)
-- `foia_files` (lines 62-68)
+```r
+source('setup.R')
+```
 
-### Can't Find a Specific File
-If a download link has moved:
-1. Check the main website (OFLC, BLS, IPUMS)
-2. Look for "Data Downloads" or "Performance Data" sections
-3. Contact the data provider's help desk
-4. Or request access to the Google Drive folder (connor@ifp.org)
+This checks for all required files and reports what's missing.
 
 ---
 
