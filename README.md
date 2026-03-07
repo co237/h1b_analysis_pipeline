@@ -59,14 +59,15 @@ h1b_analysis_pipeline/
 ├── run_all.R                       # Master execution script
 ├── lookup_wages.R                  # Fast wage lookup function
 │
-├── scripts/                        # Analysis scripts (run in order 01-07)
+├── scripts/                        # Analysis scripts (run in order 01-08)
 │   ├── 01_data_cleaning.R          # Clean and merge FOIA + LCA data
 │   ├── 02_geocode_to_pumas.R       # Map ZIP codes to Census PUMAs
 │   ├── 03 interpolate wage percentiles.R  # Calculate petition percentiles
 │   ├── 04 Calculate new prevailing wages.R # Estimate Mincer models
 │   ├── 05 Apply new PWs to H1B petitions.R # Apply wages to petitions
 │   ├── 06 nprm_simulation.R        # Simulate NPRM policy effects
-│   └── 07 interactive wage lookup.R # User-friendly wage calculator
+│   ├── 07 interactive wage lookup.R # User-friendly wage calculator
+│   └── 08 economic analysis.R      # Generate policy comparison analysis
 │
 ├── docs/
 │   └── data_directories/           # Documentation for data folders
@@ -81,6 +82,7 @@ h1b_analysis_pipeline/
 │   └── processed/                  # Final processed datasets (~350 MB)
 │
 └── output/                         # Symlinked to Google Drive
+    ├── analysis/                   # Analysis outputs (PDF reports, CSVs)
     ├── figures/                    # Generated charts
     └── tables/                     # Summary tables and exports
 ```
@@ -208,6 +210,25 @@ User-friendly calculator for Experience Benchmarking prevailing wages. Simply ed
 - Percentile scaling factors
 
 **For Programmatic Use:** Use `lookup_wages.R` directly (see next section)
+
+### Step 8: Economic Analysis (Script 08)
+**Runtime:** ~2-3 minutes
+
+Generates comprehensive policy comparison analysis comparing four scenarios:
+- **Status Quo**: Current OFLC wage levels (all petitions eligible)
+- **2021 Rule**: DOL's proposed percentile thresholds
+- **50th Percentile Minimum**: Simple uniform floor at occupational median
+- **Experience Benchmarking**: Age-adjusted prevailing wage requirement
+
+**Output:** Multi-page PDF report (`output/analysis/economic_analysis.pdf`) containing:
+1. Salary vs Wage Premium scatterplot (2021 Rule eligibility)
+2. Underpayment rates by age cohort (20-29, 30-39, 40-49, 50-59)
+3. Median wage premium by 5-year age group
+4. Policy comparison - underpayment rates across scenarios
+5. False positives/negatives table for each policy
+6. Median underpayment among underpaid workers (dollars)
+7. Median underpayment among underpaid workers (percentage)
+8. Median salary comparison table (Status Quo vs Experience Benchmarking)
 
 ## Interactive Wage Lookup
 

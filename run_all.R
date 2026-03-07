@@ -38,7 +38,7 @@ cat("Start time:", format(pipeline_start, "%Y-%m-%d %H:%M:%S"), "\n\n")
 
 cat("\n")
 cat("==============================================================================\n")
-cat("  STEP 1 of 6: Data Cleaning\n")
+cat("  STEP 1 of 7: Data Cleaning\n")
 cat("==============================================================================\n\n")
 
 step1_start <- Sys.time()
@@ -72,7 +72,7 @@ gc(verbose = FALSE)
 
 cat("\n")
 cat("==============================================================================\n")
-cat("  STEP 2 of 6: Geocode to PUMAs\n")
+cat("  STEP 2 of 7: Geocode to PUMAs\n")
 cat("==============================================================================\n\n")
 
 step2_start <- Sys.time()
@@ -104,7 +104,7 @@ gc(verbose = FALSE)
 
 cat("\n")
 cat("==============================================================================\n")
-cat("  STEP 3 of 6: Interpolate Wage Percentiles\n")
+cat("  STEP 3 of 7: Interpolate Wage Percentiles\n")
 cat("==============================================================================\n\n")
 
 step3_start <- Sys.time()
@@ -138,7 +138,7 @@ gc(verbose = FALSE)
 
 cat("\n")
 cat("==============================================================================\n")
-cat("  STEP 4 of 6: Calculate Mincer Prevailing Wages\n")
+cat("  STEP 4 of 7: Calculate Mincer Prevailing Wages\n")
 cat("==============================================================================\n\n")
 
 step4_start <- Sys.time()
@@ -169,7 +169,7 @@ tryCatch({
 
 cat("\n")
 cat("==============================================================================\n")
-cat("  STEP 5 of 6: Apply Mincer Wages to H-1B Petitions\n")
+cat("  STEP 5 of 7: Apply Mincer Wages to H-1B Petitions\n")
 cat("==============================================================================\n\n")
 
 step5_start <- Sys.time()
@@ -201,7 +201,7 @@ gc(verbose = FALSE)
 
 cat("\n")
 cat("==============================================================================\n")
-cat("  STEP 6 of 6: NPRM Simulation\n")
+cat("  STEP 6 of 7: NPRM Simulation\n")
 cat("==============================================================================\n\n")
 
 cat("NOTE: Step 6 is designed for interactive use.\n")
@@ -223,6 +223,40 @@ tryCatch({
   stop("Pipeline halted at Step 6")
 })
 
+gc(verbose = FALSE)
+
+# ==============================================================================
+# STEP 7: Economic Analysis
+# ==============================================================================
+
+cat("\n")
+cat("==============================================================================\n")
+cat("  STEP 7 of 7: Economic Analysis\n")
+cat("==============================================================================\n\n")
+
+cat("Generating comprehensive policy comparison analysis...\n\n")
+
+step7_start <- Sys.time()
+
+tryCatch({
+  source("scripts/08 economic analysis.R", local = FALSE)
+
+  step7_time <- difftime(Sys.time(), step7_start, units = "mins")
+  cat(sprintf("\n✓ Step 7 completed in %.1f minutes\n", step7_time))
+
+  if (!file.exists("output/analysis/economic_analysis.pdf")) {
+    warning("Expected output file not found: output/analysis/economic_analysis.pdf")
+  } else {
+    file_size <- file.info("output/analysis/economic_analysis.pdf")$size / 1024^2
+    cat(sprintf("Output PDF created: %.1f MB\n", file_size))
+  }
+
+}, error = function(e) {
+  cat("\n✗ ERROR in Step 7:\n")
+  cat("  ", conditionMessage(e), "\n\n")
+  stop("Pipeline halted at Step 7")
+})
+
 # ==============================================================================
 # Pipeline Complete
 # ==============================================================================
@@ -236,13 +270,14 @@ cat("===========================================================================
 cat(sprintf("Total execution time: %.1f minutes (%.2f hours)\n\n",
             total_time, total_time / 60))
 
-cat("Intermediate outputs created:\n")
+cat("Outputs created:\n")
 cat("  1. data/intermediate/h1b_fy21_24_cleaned.csv\n")
 cat("  2. data/processed/h1b_fy21_24_with_pumas.csv\n")
 cat("  3. data/processed/h1b_with_percentiles_and_native_comps.csv\n")
 cat("  4. output/tables/occ_model_coefficients.csv\n")
 cat("  5. data/processed/h1b_with_mincer_wages.csv\n")
-cat("  6. [Simulation results in console output]\n\n")
+cat("  6. [Simulation results in console output]\n")
+cat("  7. output/analysis/economic_analysis.pdf\n\n")
 
 cat("To re-run Step 6 with different policy scenarios:\n")
 cat("  source('scripts/06 nprm_simulation.R')\n\n")
