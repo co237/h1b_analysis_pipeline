@@ -5,39 +5,29 @@
 # ==============================================================================
 
 # Data files (too large for git)
-data/raw/*
-data/intermediate/*
-data/processed/*
+# Note: data/raw, data/intermediate, data/processed are symlinks to Google Drive
+# Git cannot track files within symlinked directories
+data/raw
+data/intermediate
+data/processed
 data/*.zip
 data/h1b_analysis_pipeline_data/
 data/output/
 
-# Keep README files that explain where to get data
-!data/raw/README.md
-!data/intermediate/README.md
-!data/processed/README.md
+# Large CSV files in root directory
+h1b_with_percentiles_and_native_comps.csv
+*.csv
+!example*.csv
 
 # R files
 .Rhistory
 .RData
-.Rproj.user
-*.Rproj
+.Rproj.user/
 Rplots.pdf
 
 # Output files (can be regenerated or stored in Google Drive)
-output/figures/*
-output/tables/*
-
-# Keep README files in output directories
-!output/figures/README.md
-!output/tables/README.md
-
-# Keep directory structure
-!data/raw/.gitkeep
-!data/intermediate/.gitkeep
-!data/processed/.gitkeep
-!output/figures/.gitkeep
-!output/tables/.gitkeep
+# Note: output is a symlink to Google Drive
+output
 
 # OS files
 .DS_Store

@@ -1,418 +1,454 @@
-# H-1B Wage Premium Analysis Pipeline
+# H-1B Prevailing Wage Analysis Pipeline
 
-A comprehensive R-based pipeline for analyzing wage premiums of H-1B visa holders compared to native-born workers, with multiple control configurations including geographic (PUMA) controls.
-
-## Recent Updates (February 2026)
-
-### Important Fix: Year Matching Correction
-**Previous Issue**: Some analysis sections were incorrectly using fiscal year (FY) instead of employment year when comparing H-1B wages to ACS native wages, creating a one-year mismatch.
-
-**Fix Applied**: All wage comparisons now correctly use:
-- FY 2022 H-1Bs → Employment year 2021 → ACS 2021
-- FY 2023 H-1Bs → Employment year 2022 → ACS 2022
-- FY 2024 H-1Bs → Employment year 2023 → ACS 2023
-
-This ensures H-1B workers are compared to native-born workers in the same calendar year they were employed.
-
-### New Features
-- **Export File**: New script (`04_export_h1b_comparisons.R`) creates a comprehensive CSV with all H-1B workers and their native wage benchmarks across all 5 control configurations
-- **Google Drive Integration**: Documentation for organizing large files in Google Drive for collaboration (see `DATA_GOOGLE_DRIVE.md`)
-- **Updated Pipeline**: Now runs 6 steps including the new export functionality
+**An economic analysis of H-1B prevailing wage determination and proposed DOL reforms**
 
 ## Overview
 
-This project integrates three main components:
-1. **Data Cleaning**: Processes H-1B FOIA petition data and Labor Condition Application (LCA) data
-2. **Geocoding**: Maps H-1B worksite addresses to Public Use Microdata Areas (PUMAs)
-3. **Wage Premium Analysis**: Compares H-1B wages to native-born worker wages with various control configurations
+This project reconstructs the universe of H-1B petitions filed in FY 2022-2024 and estimates alternative prevailing wages using Mincer earnings models calibrated to American Community Survey (ACS) microdata. The pipeline enables simulation of different policy scenarios, including proposed Department of Labor (DOL) reforms to the prevailing wage system.
 
-## Repository Structure
+**Key Features:**
+- Estimates worker-specific prevailing wages based on education and experience using Mincer earnings equations
+- Combines occupation-specific OFLC Level 3 wages with aggregated Mincer ratios from national models
+- Accounts for geographic wage variation through area fixed effects and MSA-specific OFLC anchors
+- Provides tools for simulating policy scenarios with custom percentile thresholds
+- Processes ~273,000 H-1B petitions (FY 2022-2024) with 76.5% successful wage matching
+
+## Quick Start
+
+### Prerequisites
+
+- **R**: Version 4.0.0 or higher
+- **RAM**: 16 GB minimum (ACS microdata requires substantial memory)
+- **Disk Space**: 20 GB for data files
+- **Runtime**: 1.5-2 hours for full pipeline
+
+### Installation
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/yourusername/h1b_analysis_pipeline.git
+   cd h1b_analysis_pipeline
+   ```
+
+2. **Install R packages**
+   ```r
+   install.packages(c("dplyr", "tidyr", "readr", "readxl", "ipumsr",
+                      "stringr", "sf", "tidygeocoder", "fixest", "Hmisc"))
+   ```
+
+3. **Obtain required data** (see `DATA_SOURCES.md` for detailed instructions)
+   - H-1B FOIA petition data from [Bloomberg Graphics](https://github.com/BloombergGraphics/2024-h1b-immigration-data)
+   - Labor Condition Application (LCA) data from [DOL OFLC](https://www.dol.gov/agencies/eta/foreign-labor/performance)
+   - ACS microdata from [IPUMS USA](https://usa.ipums.org/)
+   - OFLC prevailing wage tables (FY 2021-2025)
+   - Geographic and occupation crosswalks
+
+4. **Run the pipeline**
+   ```r
+   source("run_all.R")  # Runs all scripts in sequence
+   ```
+
+## Project Structure
 
 ```
 h1b_analysis_pipeline/
-├── README.md                      # This file
-├── DATA_GOOGLE_DRIVE.md           # Guide for organizing large files
-├── config.R                       # Central configuration file
-├── run_pipeline_simple.R          # Main pipeline orchestration (RECOMMENDED)
-├── .gitignore                     # Git ignore rules
+├── README.md                       # This file
+├── DATA_SOURCES.md                 # Data download instructions
+├── config.R                        # Central configuration
+├── run_all.R                       # Master execution script
+├── setup.R                         # First-time setup (install packages, create directories)
 │
-├── scripts/                       # Analysis scripts (run in order)
-│   ├── 01_data_cleaning.R        # Clean and merge FOIA/LCA data
-│   ├── 02_geocode_to_pumas.R     # Geocode ZIP codes to PUMAs
-│   ├── 03_wage_premium_analysis.R # Wage premium analysis with controls
-│   ├── 04_export_h1b_comparisons.R # Export H-1B with native comparisons
-│   └── simple/                    # Simplified step-by-step scripts
-│       ├── step1_process_lca.R
-│       └── step2_process_foia.R
+├── scripts/                        # Analysis scripts (run in order 01-08)
+│   ├── 01_data_cleaning.R          # Clean and merge FOIA + LCA data
+│   ├── 02_geocode_to_pumas.R       # Map ZIP codes to Census PUMAs
+│   ├── 03 interpolate wage percentiles.R  # Calculate petition percentiles
+│   ├── 04 Calculate new prevailing wages.R # Estimate Mincer models
+│   ├── 05 Apply new PWs to H1B petitions.R # Apply wages to petitions
+│   ├── 06 nprm_simulation.R        # Simulate NPRM policy effects
+│   ├── 07 interactive wage lookup.R # User-friendly wage calculator
+│   ├── 08 economic analysis.R      # Generate policy comparison analysis
+│   └── lookup_wages.R              # Fast programmatic wage lookup function
 │
-├── data/                          # Data files (not tracked in git)
-│   ├── raw/                       # Original data files
-│   │   ├── TRK_13139_FY20XX.csv  # FOIA H-1B petition data
-│   │   ├── LCA_Data/             # Labor Condition Applications
-│   │   ├── usa_00061.xml         # ACS IPUMS DDI file
-│   │   ├── usa_00061.dat.gz      # ACS IPUMS microdata
-│   │   ├── soc_2018_definitions.xlsx
-│   │   ├── ZIP_COUNTY_122024.xlsx
-│   │   ├── ZIP_CBSA_122024.xlsx
-│   │   ├── area_definitions_m2023.xlsx
-│   │   ├── soc_2010_to_2018_crosswalk.xlsx
-│   │   ├── DOT_to_ONET_SOC.xlsx
-│   │   ├── OFLC_Wages_2024-25/   # OFLC wage level data
-│   │   └── census_crosswalks/    # Auto-downloaded by script
-│   │
-│   ├── intermediate/              # Intermediate outputs
-│   │   ├── h1b_fy21_24_cleaned.csv
-│   │   └── dot_matching/         # Occupation matching files
-│   │
-│   └── processed/                 # Final processed data
-│       └── h1b_fy21_24_with_pumas.csv
+├── docs/
+│   └── data_directories/           # Documentation for data folders
+│       ├── RAW_DATA.md             # What's in data/raw/
+│       ├── INTERMEDIATE_DATA.md    # What's in data/intermediate/
+│       ├── PROCESSED_DATA.md       # What's in data/processed/
+│       └── README.md               # Data directory overview
 │
-└── output/                        # Analysis outputs
-    ├── figures/                   # Generated plots (30+ charts)
-    └── tables/                    # Generated tables
-        ├── summary_by_control.csv
-        └── h1b_with_native_comparisons_fy2022_2024.csv (45 MB)
+├── data/                           # Symlinked to Google Drive
+│   ├── raw/                        # Source data (~7 GB)
+│   ├── intermediate/               # Intermediate outputs (~658 MB)
+│   └── processed/                  # Final processed datasets (~350 MB)
+│
+└── output/                         # Symlinked to Google Drive
+    ├── analysis/                   # Analysis outputs (PDF reports, CSVs)
+    ├── figures/                    # Generated charts
+    └── tables/                     # Summary tables and exports
 ```
 
-## Data Files
+## Pipeline Steps
 
-### 📦 Large Data Files on Google Drive
+### Step 1: Data Cleaning (Script 01)
+**Runtime:** ~20-30 minutes
 
-**All large data files (>100 MB) are stored in Google Drive** to keep the GitHub repository lightweight.
+Merges FOIA petition data with LCA applications to obtain occupation codes and wage levels. Standardizes all occupation codes using crosswalks:
+- **FY2023+**: Direct SOC 2018 → ACS 2018 mapping
+- **FY2021-2022**: Two-stage SOC 2010 → SOC 2018 → ACS 2018 mapping
 
-**Google Drive Folder**: `h1b_analysis_pipeline_data` (~8.2 GB)
+**Input:**
+- H-1B FOIA petition files (FY 2021-2024)
+- LCA disclosure files (2015-2024)
+- SOC 2010 to SOC 2018 crosswalk
 
-**For access**: Contact connor@ifp.org or see `DATA_GOOGLE_DRIVE.md` for setup instructions.
+**Output:** `data/intermediate/h1b_fy21_24_cleaned.csv` (~335 MB, 370K petitions)
 
-**Folder contents**:
-- `raw/` (~7.1 GB): Original source data
-- `intermediate/` (~658 MB): Processing checkpoints
-- `processed/` (~350 MB): Final geocoded dataset
-- `output/tables/` (~45 MB): Large analysis outputs
+### Step 2: Geocode to PUMAs (Script 02)
+**Runtime:** ~5 minutes
 
-### Required Data Files
+Maps worksite ZIP codes to Census Public Use Microdata Areas (PUMAs) using ZCTA crosswalk files for both 2020 and 2010 vintages.
 
-If setting up from scratch, you must obtain and place the following files in `data/raw/` (or get them from Google Drive):
+**Output:** `data/processed/h1b_fy21_24_with_pumas.csv` (~350 MB)
 
-#### 1. H-1B FOIA Petition Data
-- **Files**: `TRK_13139_FY2021.csv`, `TRK_13139_FY2022.csv`, `TRK_13139_FY2023.csv`, `TRK_13139_FY2024_single_reg.csv`, `TRK_13139_FY2024_multi_reg.csv`
-- **Source**: [Bloomberg H-1B Immigration Data](https://github.com/BloombergGraphics/2024-h1b-immigration-data)
-- **Description**: Detailed H-1B lottery and petition data for fiscal years 2021-2024
+### Step 3: Interpolate Wage Percentiles (Script 03)
+**Runtime:** ~15-20 minutes
 
-#### 2. Labor Condition Application (LCA) Data
-- **Directory**: `data/raw/LCA_Data/`
-- **Files**: Quarterly LCA files for 2020-2024, annual files for 2015-2019
-- **Source**: [DOL OFLC](https://www.dol.gov/agencies/eta/foreign-labor/performance)
-- **Format**:
-  - `LCA_Disclosure_Data_FY20XX_QX.xlsx` (2020-2024)
-  - `H-1B_Disclosure_Data_FY20XX.xlsx` (2015-2019)
+Calculates each petition's estimated percentile rank within its occupation using OFLC wage levels as anchors. Uses linear interpolation between wage levels (17th, 34th, 50th, 67th percentiles) and constructs synthetic 90th percentile using ACS wage distributions.
 
-#### 3. ACS Microdata (IPUMS)
-- **Files**: `usa_00068.xml` (DDI) and `usa_00068.dat.gz` (microdata) - **Note**: Filename may vary based on your IPUMS extract
-- **Source**: [IPUMS USA](https://usa.ipums.org/)
-- **Years**: 2021-2023 ACS
-- **Required Variables**:
-  - `YEAR`, `AGE`, `CITIZEN`, `INCWAGE`, `EMPSTAT`, `PERWT`
-  - `EDUCD` (education code)
-  - `OCCSOC` (occupation SOC code)
-  - **`PUMA`** (Public Use Microdata Area) - **CRITICAL for new control configuration**
-- **Sample**: Use 1% or higher sample for sufficient cell sizes
+**Output:** `data/processed/h1b_with_percentiles_and_native_comps.csv` (~360 MB)
 
-#### 4. SOC Code Definitions
-- **File**: `soc_2018_definitions.xlsx`
-- **Source**: [BLS SOC](https://www.bls.gov/soc/)
+### Step 4: Calculate Mincer Prevailing Wages (Script 04)
+**Runtime:** ~30-45 minutes
 
-#### 5. Geographic Crosswalks
-- **Files**:
-  - `ZIP_COUNTY_122024.xlsx` - HUD ZIP to County crosswalk
-  - `ZIP_CBSA_122024.xlsx` - HUD ZIP to CBSA crosswalk
-  - `area_definitions_m2023.xlsx` - County to MSA crosswalk
-- **Sources**:
-  - [HUD USPS ZIP Code Crosswalk Files](https://www.huduser.gov/portal/datasets/usps_crosswalk.html)
-  - [BLS MSA Definitions](https://www.bls.gov/oes/current/msa_def.htm)
+**Core Innovation:** Estimates national Mincer earnings equations with area fixed effects for 377 occupations using pooled ACS microdata (2019-2023).
 
-#### 6. Occupation Code Crosswalks
-- **Files**:
-  - `soc_2010_to_2018_crosswalk.xlsx` - SOC 2010 to 2018 mapping
-  - `DOT_to_ONET_SOC.xlsx` - DOT to SOC crosswalk
-- **Source**: [BLS SOC](https://www.bls.gov/soc/)
+**Methodology:**
+- Fits one national model per occupation: `log(wage) ~ exp + exp² + exp³ + exp⁴ + education | area_FE`
+- Education enters as categorical (8 levels: Less than HS, High school, Some college, Associates, Bachelors, Masters, Professional degree, PhD)
+- Experience enters as quartic polynomial to capture nonlinear wage-experience profiles
+- Area fixed effects absorb location-based wage variation
+- Calculates education-experience ratios by predicting wages across all areas, weighting by ACS person weights (PERWT), and comparing to national median
+- Stores one ratio per (occupation, education, experience) combination
 
-#### 7. OFLC Wage Level Data
-- **Directory**: `data/raw/OFLC_Wages_2024-25/`
-- **Files**: `ALC_Export_FY2020.csv` through `ALC_Export_FY2023.csv`
-- **Source**: [OFLC Performance Data](https://www.dol.gov/agencies/eta/foreign-labor/performance)
+**Hierarchical Fallback:** 6-digit SOC → 5-digit → 3-digit → 2-digit → pooled (minimum 100 observations, all models include area FE)
 
-### Auto-Downloaded Data
+**Output:**
+- `data/processed/mincer_edu_exp_ratios.csv` (119,638 ratios for 377 occupations)
+- Model objects stored in memory
 
-The following data is automatically downloaded by the pipeline:
-- Census ZCTA to PUMA crosswalks (2020 and 2010)
-- Census PUMA relationship files
+### Step 5: Apply Mincer Wages to H-1B Petitions (Script 05)
+**Runtime:** ~10-15 minutes
 
-## Variable Linking and Standardization
+Applies Mincer-based prevailing wages to each petition by combining:
+1. **Specific OFLC wages**: Each occupation's Level 3 wage in each MSA (e.g., 17-2171 Petroleum Engineers in Houston)
+2. **Aggregated Mincer ratios**: Education-experience premiums from national models (e.g., all 17-21XX engineers share the same ratios)
 
-### Key Variables Across Datasets
+**Formula:**
+```
+pw_p50 = OFLC_Level3[specific_SOC, MSA] × ratio_p50[aggregated_ACS_code, education, experience]
+```
 
-The pipeline carefully standardizes variables to enable linking:
+**Example:**
+- **Petroleum Engineers (17-2171)** and **Mechanical Engineers (17-2141)** have different OFLC wages
+- Both use the same Mincer ratios from the **1721XX Engineers** model
+- Result: Occupation-specific wages adjusted for individual education/experience
 
-| Variable | H-1B Data | ACS Data | Notes |
-|----------|-----------|----------|-------|
-| **YEAR** | `registration_lottery_year` | `YEAR` | FY year (H-1B) → Calendar year (ACS) |
-| **AGE** | Calculated from `registration_birth_year` | `AGE` | Integer |
-| **OCCSOC** | `SOC_CODE` (cleaned, no hyphens) | `OCCSOC` | 6-digit SOC code as character |
-| **EDUCD** | `petition_beneficiary_edu_code` (mapped) | `EDUCD` | Integer education codes |
-| **INCWAGE** | `petition_annual_pay_clean` | `INCWAGE` | Annual wages in dollars |
-| **PUMA** | `PUMA_2010` (from geocoding) | `PUMA` | 7-digit code (state FIPS + PUMA) |
+**SOC Code Handling:**
+- FY2021-2022 OFLC data uses SOC 2010 codes (e.g., 15-1132, 15-1133)
+- Script converts to SOC 2018 format (e.g., 15-1252) and aggregates when multiple 2010 codes map to one 2018 code
+- Ensures petitions match correctly across all fiscal years
 
-### Important Data Type Conversions
+**Output:** `data/processed/h1b_with_mincer_wages.csv` (~370 MB)
 
-1. **SOC Codes**: Converted to character type and stripped of hyphens for consistent matching
-   - H-1B: `"15-1252"` → `"151252"`
-   - ACS: Already numeric, converted to character
+**Success Rate:** 209,129 petitions with valid Mincer wages (76.5% of total)
 
-2. **Education Codes**: H-1B petition codes mapped to ACS EDUCD values
+**Note:** Steps 4 and 5 should run in the same R session. Script 05 will automatically run Script 04 if needed.
+
+### Step 6: NPRM Simulation (Script 06)
+**Runtime:** < 1 minute
+
+Simulates proposed DOL reforms by setting custom percentile thresholds for each wage level.
+
+**User-Configurable Parameters:**
+```r
+pw_level_I_threshold   <- 35  # Proposed threshold for Level I (2021 Rule)
+pw_level_II_threshold  <- 53  # Proposed threshold for Level II (2021 Rule)
+pw_level_III_threshold <- 72  # Proposed threshold for Level III (2021 Rule)
+pw_level_IV_threshold  <- 90  # Proposed threshold for Level IV (2021 Rule)
+```
+
+**Logic:**
+1. Uses pre-calculated `petition_percentile_combined` to determine who qualifies
+2. If `petition_percentile_combined >= threshold` → petition qualifies under proposed system
+3. Among those who qualify, checks if `petition_wage < pw_p50` (Mincer median) → underpaid
+
+**Output:** Console summary with qualification rates and underpayment statistics by wage level
+
+### Step 7: Interactive Wage Lookup (Script 07)
+**Runtime:** ~2 seconds (after Script 04 has run)
+
+User-friendly calculator for Experience Benchmarking prevailing wages. Simply edit parameters at the top of the script and run.
+
+**How to Use:**
+1. Open `scripts/07 interactive wage lookup.R` in RStudio
+2. Edit the USER INPUTS section (lines 26-44):
    ```r
-   "A" (< HS)     → 1
-   "B" (HS)       → 63
-   "C" (Some col) → 65
-   "D" (Associate)→ 71
-   "E" (Bachelor) → 81
-   "F" (Master)   → 101
-   "G" (Prof deg) → 114
-   "H/I" (PhD)    → 115/116
+   SOC_CODE <- "15-1252"      # Occupation
+   EDUCATION <- "Bachelors"   # Education level
+   EXPERIENCE <- 5            # Years of experience
+   MSA_CODE <- "41860"        # San Francisco
+   YEAR <- 2023               # Fiscal year
+   WAGE_TYPE <- "ALC"         # Standard or "EDC" for ACWIA
    ```
+3. Run the entire script (Ctrl/Cmd + Shift + Enter)
 
-3. **PUMA Codes**:
-   - H-1B addresses geocoded to 2020 PUMAs, then crosswalked to 2010 PUMAs
-   - Use 2010 PUMAs for matching with 2021-2023 ACS (which uses 2010 PUMA boundaries)
-   - Format: 7-digit string (2-digit state FIPS + 5-digit PUMA code)
+**Output:** Formatted display showing:
+- Occupational median (OFLC Level 3)
+- Four Experience Benchmarking wage levels (50th, 62nd, 75th, 90th percentiles)
+- Education-experience adjustment ratio
+- Comparison to typical worker (e.g., "earns 21.4% less than typical worker")
+- Percentile scaling factors
 
-4. **Age Groups**: Created consistently across both datasets
-   - Bins: [20,25), [25,30), [30,35), [35,40), [40,45), [45,50), [50,55), [55,60), [60,65)
+**For Programmatic Use:** Use `scripts/lookup_wages.R` directly (see next section)
 
-### Control Configurations
+### Step 8: Economic Analysis (Script 08)
+**Runtime:** ~2-3 minutes
 
-The analysis supports five control configurations:
+Generates comprehensive policy comparison analysis comparing four scenarios:
+- **Status Quo**: Current OFLC wage levels (all petitions eligible)
+- **2021 Rule**: DOL's proposed percentile thresholds
+- **50th Percentile Minimum**: Simple uniform floor at occupational median
+- **Experience Benchmarking**: Age-adjusted prevailing wage requirement
 
-1. **age_only**: `YEAR` + `age_grp`
-2. **age_education**: `YEAR` + `EDUCD` + `age_grp`
-3. **age_occupation**: `YEAR` + `OCCSOC` + `age_grp`
-4. **full**: `YEAR` + `EDUCD` + `OCCSOC` + `age_grp`
-5. **age_occ_ed_puma** (NEW): `YEAR` + `EDUCD` + `OCCSOC` + `age_grp` + `PUMA`
+**Output:** Multi-page PDF report (`output/analysis/economic_analysis.pdf`) containing:
+1. Salary vs Wage Premium scatterplot (2021 Rule eligibility)
+2. Underpayment rates by age cohort (20-29, 30-39, 40-49, 50-59)
+3. Median wage premium by 5-year age group
+4. Policy comparison - underpayment rates across scenarios
+5. False positives/negatives table for each policy
+6. Median underpayment among underpaid workers (dollars)
+7. Median underpayment among underpaid workers (percentage)
+8. Median salary comparison table (Status Quo vs Experience Benchmarking)
 
-## Installation and Setup
+## Interactive Wage Lookup
 
-### 1. System Requirements
+Two ways to query Experience Benchmarking prevailing wages:
 
-- **R**: Version 4.0.0 or higher
-- **RStudio**: Recommended for interactive use
-- **Memory**: At least 16GB RAM recommended (ACS data is large)
-- **Disk Space**: At least 10GB for data files
+### Option 1: User-Friendly Script (Script 07)
 
-### 2. R Package Dependencies
-
-The pipeline will attempt to install missing packages automatically. Required packages:
-
-```r
-# Data manipulation
-install.packages(c("dplyr", "tidyr", "readr", "purrr", "stringr"))
-
-# File I/O
-install.packages(c("readxl", "ipumsr"))
-
-# Geocoding and spatial data
-install.packages(c("tidygeocoder", "sf", "tidycensus"))
-
-# String matching
-install.packages("fuzzyjoin")
-
-# Visualization and formatting
-install.packages(c("ggplot2", "scales", "knitr"))
-
-# Statistics
-install.packages("matrixStats")
-```
-
-### 3. Clone or Download Repository
-
-```bash
-git clone https://github.com/yourusername/h1b_analysis_pipeline.git
-cd h1b_analysis_pipeline
-```
-
-### 4. Get Data Files from Google Drive
-
-**Option 1: Request access to shared Google Drive folder**
-- Contact connor@ifp.org for access to `h1b_analysis_pipeline_data`
-- Download or sync the folder
-- See `DATA_GOOGLE_DRIVE.md` for detailed setup instructions
-
-**Option 2: Gather data files yourself**
-- Follow the data requirements list above
-- Download from original sources
-- Place in `data/raw/` directory
-
-### 5. Configure Paths
-
-Edit `config.R` to set paths appropriate for your system. By default, paths are relative to the project directory.
-
-## Usage
-
-### Running the Complete Pipeline (RECOMMENDED)
-
-The easiest way to run the analysis is using the simplified pipeline script:
+Best for **occasional lookups** in RStudio:
 
 ```r
-# In R or RStudio, from the project directory:
-source("run_pipeline_simple.R")
+# Open scripts/07 interactive wage lookup.R
+# Edit parameters at top, then run script
+# Get formatted output with explanations
 ```
 
-This will:
-1. Process LCA data (Step 1)
-2. Process FOIA data (Step 2)
-3. Merge and clean data (Step 3)
-4. Geocode to PUMAs (Step 4)
-5. Run wage premium analysis (Step 5)
-6. Export H-1B with native comparisons (Step 6)
+See [Step 7](#step-7-interactive-wage-lookup-script-07) above for details.
 
-The pipeline has checkpoint recovery - if it crashes, just run it again and it will skip completed steps.
+### Option 2: Programmatic Function (scripts/lookup_wages.R)
 
-### Running Individual Steps
-
-You can also run steps independently:
+Best for **batch queries** or **integration** into other code:
 
 ```r
-# Steps 1-4: Data processing
-source("scripts/simple/step1_process_lca.R")
-source("scripts/simple/step2_process_foia.R")
-source("scripts/01_data_cleaning.R")
-source("scripts/02_geocode_to_pumas.R")
+# Load the function and data (fast - ~2 seconds)
+source("scripts/lookup_wages.R")
 
-# Step 5: Wage Premium Analysis
-source("scripts/03_wage_premium_analysis.R")
-
-# Step 6: Export comparisons file
-source("scripts/04_export_h1b_comparisons.R")
-```
-
-### Customizing Pipeline Execution
-
-Edit `run_pipeline_simple.R` to skip certain steps:
-
-```r
-run_steps <- list(
-  step1 = TRUE,   # Process LCA data
-  step2 = TRUE,   # Process FOIA data
-  step3 = TRUE,   # Merge FOIA + LCA
-  geocode = TRUE, # Geocode to PUMAs
-  analyze = TRUE, # Wage premium analysis
-  export = TRUE   # Export comparisons file
+# Query a specific scenario
+result <- get_prevailing_wages(
+  soc_code = "15-1252",        # Software Developers
+  education = "Bachelors",      # Bachelor's degree
+  experience = 5,               # 5 years experience
+  msa_code = "41860",          # San Francisco MSA
+  year = 2023,                 # Fiscal year 2023
+  wage_type = "ALC"            # Standard (or "EDC" for ACWIA)
 )
+
+# Access results
+result$status       # "success" or "error"
+result$oflc_level3  # OFLC Level 3 wage (occupational median)
+result$pw_p50       # Mincer wage at 50th percentile
+result$pw_p62       # Mincer wage at 62nd percentile
+result$pw_p75       # Mincer wage at 75th percentile
+result$pw_p90       # Mincer wage at 90th percentile
 ```
 
-## Outputs
+**Parameters:**
+- `soc_code`: 6-digit SOC code (with or without hyphen, SOC 2010 or 2018)
+- `education`: "Less than HS", "High school", "Some college", "Associates", "Bachelors", "Masters", "Prof degree", "PhD"
+- `experience`: Years of experience (0-50)
+- `msa_code`: MSA/area code
+- `year`: Fiscal year (2021-2026)
+- `wage_type`: "ALC" (standard) or "EDC" (ACWIA)
 
-### Data Outputs
+**Data Efficiency:** Uses RDS format (instant loading, no massive CSV files required)
 
-- `data/intermediate/h1b_fy21_24_cleaned.csv`: Cleaned H-1B data with wage levels (~334 MB)
-- `data/processed/h1b_fy21_24_with_pumas.csv`: H-1B data with PUMA codes added (~350 MB)
+## Key Variables
 
-### Analysis Outputs
+| Variable | Description |
+|----------|-------------|
+| `petition_annual_pay_clean` | Annualized wage paid to H-1B worker |
+| `PW_WAGE_LEVEL` | DOL-assigned prevailing wage level (I, II, III, IV) |
+| `ACS_OCCSOC` | ACS occupation code (harmonized across years) |
+| `petition_percentile_combined` | Worker's estimated percentile within occupation |
+| `pw_p50` / `pw_p62` / `pw_p75` / `pw_p90` | Mincer-based prevailing wages at 50th, 62nd, 75th, 90th percentiles |
+| `pw_oflc_median` | OFLC Level 3 wage anchor |
+| `Years_pot_experience` | Years of potential experience (age - education years - 6) |
+| `highest_ed` | Standardized education category |
 
-Outputs are saved to `output/figures/` and `output/tables/`:
+## Methodology Overview
 
-**Charts** (30+ figures):
-- Wage premium by age group (all control configurations)
-- Comparisons by H-1B dependency status
-- Comparisons by DOL wage level
-- Comparisons by prior visa status
-- Top H-1B occupations by wage premium
-- Industry analysis
-- Top employer analysis
+### National Mincer Models with Area Fixed Effects
 
-**Tables**:
-- `summary_by_control.csv`: Summary statistics for each control configuration
-- **`h1b_with_native_comparisons_fy2022_2024.csv`** (~45 MB): **NEW** - Comprehensive export with all 273,545 H-1B workers (FY 2022-2024) and their native wage benchmarks for all 5 control configurations
+**Key Innovation:** Instead of estimating separate Mincer models for each occupation-area combination, we fit ONE national model per occupation that includes area fixed effects:
 
-### Understanding the Export File
+```
+log(wage) = α + β₁·exp + β₂·exp² + β₃·exp³ + β₄·exp⁴ + Σγₖ·educationₖ + δₘ·area_FE + ε
+```
 
-The `h1b_with_native_comparisons_fy2022_2024.csv` file contains:
+**Why This Approach?**
+- **Place-invariant human capital returns:** Education and experience coefficients capture "pure" returns after controlling for geography
+- **Better coverage:** Only need ≥100 observations nationally (not per area)
+- **More stable estimates:** Larger sample sizes reduce coefficient variance
+- **Simpler code:** Eliminates complex area-specific fallback logic
 
-**Columns:**
-- Identifiers: `applicant_id`, `registration_lottery_year`, `employment_year`
-- H-1B characteristics: `h1b_wage`, `age`, `age_group`, `education_code`, `occupation_soc`, `occupation_title`, `puma_code`, `employer_name`, `h1b_dependent`, `wage_level`, `prior_visa`
-- Native wage benchmarks: `native_wage_age_only`, `native_wage_age_education`, `native_wage_age_occupation`, `native_wage_full`, `native_wage_puma`
-- Wage premiums: `premium_age_only`, `premium_age_education`, `premium_age_occupation`, `premium_full`, `premium_puma`
+**How It Works:**
+1. Fit national model with area FE: `feols(log_wage ~ exp + exp² + exp³ + exp⁴ + education | area, weights = PERWT)`
+2. For each (education, experience) combination:
+   - Predict wages across ALL areas in the model
+   - Weight by PERWT (ACS person weights summed by area)
+   - Calculate weighted average predicted wage
+   - Compare to national median → store ratio
+3. Apply to petitions: `wage = ratio[aggregated_ACS_code, edu, exp] × OFLC_Level3[specific_SOC, MSA]`
+   - **OFLC wages are occupation-specific** (17-2171 Petroleum Engineers ≠ 17-2141 Mechanical Engineers)
+   - **Mincer ratios are aggregated** (all 17-21XX engineers share the same education-experience premiums)
 
-**Control Configurations:**
-1. **age_only**: Matched on `employment_year` + `age_group`
-2. **age_education**: Matched on `employment_year` + `education_code` + `age_group`
-3. **age_occupation**: Matched on `employment_year` + `occupation_soc` + `age_group`
-4. **full**: Matched on `employment_year` + `education_code` + `occupation_soc` + `age_group`
-5. **puma**: Matched on `employment_year` + `education_code` + `occupation_soc` + `age_group` + `puma_code`
+### Occupation Code Harmonization
 
-**Key Point**: All comparisons use **employment year** (FY year - 1) to ensure H-1B workers are compared to natives in the same calendar year they were employed.
+**Challenge:** Data spans multiple SOC vintages:
+- FY2021-2022: SOC 2010 codes
+- FY2023-2024: SOC 2018 codes
+- ACS: Custom OCCSOC codes
+
+**Solution:** Two-stage crosswalk system:
+1. **FY2023+ → ACS:** Direct mapping using `occupation_oflc_to_acs_crowsswalk.csv`
+2. **FY2021-2022 → ACS:** Two-stage mapping (SOC 2010 → SOC 2018 → ACS 2018)
+   - Uses official Census SOC 2010-to-2018 crosswalk
+   - Then maps to ACS 2018 using existing crosswalk
+   - Includes manual mappings for consolidated IT occupations
+
+**Coverage:**
+- FY2023+ crosswalk: 100% coverage (848 SOC 2018 codes)
+- FY2021-2022 crosswalk: 100% coverage (892 SOC 2010 codes, improved from previous 87.6%)
+
+### Geographic Handling
+
+The wage calculation combines national and area-specific components:
+
+1. **Mincer ratios:** Place-invariant education/experience premiums from national models
+2. **OFLC wage anchor:** Area-specific wage levels from OFLC prevailing wage tables
+
+**Example:** A junior software developer (15-1252) in Boise uses:
+- National Mincer ratio for (151252, Bachelor's, 3 years experience) = 0.85
+- Boise MSA OFLC Level 3 wage for SOC 15-1252 = $110,000
+- Final wage: `0.85 × $110,000 = $93,500`
+
+**Important:** If OFLC doesn't publish a wage for a specific SOC-area combination (e.g., rare occupation in small metro), the petition receives NA. This ensures we only produce wages where OFLC provides official prevailing wage data for that specific occupation.
+
+## Results Summary
+
+### Coverage Statistics
+- **Total H-1B petitions:** 273,546 (FY 2022-2024)
+- **Petitions with valid Mincer wages:** 209,129 (76.5%)
+- **Occupations with Mincer models:** 377
+- **Education-experience ratios:** 119,638
+- **Unique SOC codes in petitions:** 378
+- **Unique ACS codes (aggregated for Mincer):** 213
+
+### Policy Simulation Results
+The pipeline supports simulation of different wage threshold scenarios:
+- **Status Quo (17th, 34th, 50th, 67th)**: Current OFLC system
+- **2021 Rule (35th, 53rd, 72nd, 90th)**: Proposed DOL reform thresholds
+
+## Data Sources
+
+For data download instructions and file structure, see **`DATA_SOURCES.md`**
+
+## System Requirements
+
+- **R Version:** 4.0.0 or higher
+- **RAM:** 16 GB minimum (32 GB recommended for smooth operation)
+- **Disk Space:**
+  - Data files: ~10 GB
+  - Intermediate outputs: ~5 GB
+  - Free space for processing: ~5 GB
+- **Runtime:** Full pipeline takes 1.5-2 hours on a modern laptop
 
 ## Troubleshooting
 
-### Common Issues
+### Memory Issues
+If Step 4 (Mincer estimation) runs out of memory:
+```r
+# Restart R session
+.rs.restartR()
 
-**Issue**: "PUMA variable not found in ACS data"
-- **Solution**: Re-download your ACS extract from IPUMS and include the PUMA variable
+# Run scripts in batches
+source("scripts/01_data_cleaning.R")
+source("scripts/02_geocode_to_pumas.R")
+source("scripts/03 interpolate wage percentiles.R")
 
-**Issue**: "Missing required files"
-- **Solution**: Ensure all data files listed in Data Requirements are in `data/raw/`
-
-**Issue**: Script fails during geocoding
-- **Solution**: The Census API may be temporarily unavailable. The script caches downloads, so you can re-run safely.
-
-**Issue**: Low merge rates for PUMA controls
-- **Solution**: Check that:
-  - H-1B data has valid ZIP codes
-  - PUMA geocoding completed successfully
-  - ACS data includes PUMA variable
-  - PUMA codes are character type in both datasets
-
-### Python Scripts (DOT Matching)
-
-The data cleaning script calls Python scripts for occupation code matching:
-- `dot_soc_xwalk_match.py`
-- `dot_soc_matching.py`
-
-These should be placed in `data/intermediate/dot_matching/`. Contact the original authors (Jiaxin He, Sarah Eckhardt) for these files.
-
-## Authors and Citation
-
-**Pipeline Integration**: Connor O'Brien (2026)
-
-**Original Scripts**:
-- Data Cleaning: Jiaxin He (jiaxin@eig.org), Sarah Eckhardt (sarah@eig.org)
-- Wage Premium Analysis: [Original author]
-- Geocoding: [Original author]
-
-**Data Sources**:
-- H-1B FOIA Data: Bloomberg Graphics
-- ACS Microdata: IPUMS USA
-- Geographic Crosswalks: Census Bureau, HUD, BLS
-
-If you use this pipeline in your research, please cite:
+# New session
+source("scripts/04 Calculate new prevailing wages.R")
+source("scripts/05 Apply new PWs to H1B petitions.R")
 ```
-O'Brien, C. (2026). H-1B Wage Premium Analysis Pipeline. GitHub repository.
+
+### Missing Occupation Matches
+Some petitions (~23.5%) don't receive Mincer wages due to:
+- Missing required fields (education primarily): 23.5%
+- No matching OFLC/Mincer data despite complete fields: <0.1%
+
+The vast majority of missing wages are due to missing education codes in the petition data, not failures in the matching logic.
+
+### Crosswalk Coverage
+- **Current (two-stage)**: 100% coverage for both FY2021-2022 and FY2023+
+- All OFLC SOC codes successfully map to ACS occupation codes
+- Previous approach had 87.6% coverage; new two-stage crosswalk achieves 100%
+
+### PUMA Geocoding Gaps
+~5-10% of petitions may not match to PUMAs if:
+- ZIP code is missing or invalid
+- ZIP is not in Census ZCTA file (P.O. boxes, military addresses)
+
+## Authors
+
+**Institute for Progress** (2026)
+
+Connor O'Brien (connor@ifp.org)
+
+Based on data cleaning code from Economic Innovation Group.
+
+## Citation
+
+If you use this analysis:
+
+```
+O'Brien, C. (2026). H-1B Prevailing Wage Analysis Pipeline.
+Institute for Progress. GitHub repository.
+https://github.com/yourusername/h1b_analysis_pipeline
 ```
 
 ## License
 
-[Specify your license here]
+[To be determined]
 
 ## Contact
 
-For questions or issues:
-- Open an issue on GitHub
-- Contact: [your email]
+For questions or data access:
+- Email: connor@ifp.org
+- GitHub Issues: [Open an issue](https://github.com/yourusername/h1b_analysis_pipeline/issues)
 
-## Changelog
+## Acknowledgments
 
-### Version 1.0 (2026-01-23)
-- Initial integrated pipeline
-- Added PUMA control configuration
-- Standardized paths and data linking
-- Created comprehensive documentation
+- **Data Sources:** Bloomberg Graphics, DOL OFLC, IPUMS USA, Bureau of Labor Statistics
+- **Methodology:** National Mincer models with area fixed effects approach
+- **Code Development:** Economic Innovation Group (data cleaning), Institute for Progress (Mincer estimation and simulation)

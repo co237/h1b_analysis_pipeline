@@ -16,24 +16,23 @@
 #   - Census Relationship Files: https://www.census.gov/geographies/reference-files/time-series/geo/relationship-files.2020.html
 # ============================================================================
 
+# Load configuration
+if (file.exists("config.R")) {
+  source("config.R")
+} else if (file.exists("../config.R")) {
+  source("../config.R")
+} else {
+  stop("Cannot find config.R. Please make sure your working directory is set to the project root")
+}
+
 library(dplyr)
 library(readr)
 library(stringr)
 library(tidyr)
 
-# ============================================================================
+########################################################################################
 # CONFIGURATION
-# ============================================================================
-
-# Load configuration
-# Check if we're in the scripts directory or project root
-if (file.exists("../config.R")) {
-  source("../config.R")  # Running from scripts/
-} else if (file.exists("config.R")) {
-  source("config.R")      # Running from project root
-} else {
-  stop("Cannot find config.R. Please run from project root or scripts/ directory")
-}
+########################################################################################
 
 # Input file path (output from data cleaning step)
 input_file <- cleaned_h1b_file
@@ -48,9 +47,9 @@ puma_2020_to_2010_url <- "https://www2.census.gov/geo/docs/maps-data/data/rel202
 # Local cache paths (from config)
 cache_dir <- census_crosswalks_dir
 
-# ============================================================================
+########################################################################################
 # HELPER FUNCTIONS
-# ============================================================================
+########################################################################################
 
 #' Download file if not already cached
 download_if_needed <- function(url, local_path) {
@@ -77,9 +76,9 @@ clean_zip <- function(zip) {
   return(zip_clean)
 }
 
-# ============================================================================
+########################################################################################
 # STEP 1: Download and Process 2020 ZCTA-to-PUMA Crosswalk
-# ============================================================================
+########################################################################################
 
 message("\n=== Step 1: Processing 2020 ZCTA-to-PUMA Crosswalk ===\n")
 
@@ -123,9 +122,9 @@ zcta_puma_2020 <- zcta_puma_raw %>%
 message("Unique ZCTAs with 2020 PUMA assignments: ", n_distinct(zcta_puma_2020$ZCTA5))
 message("Unique 2020 PUMAs: ", n_distinct(zcta_puma_2020$PUMA_2020))
 
-# ============================================================================
+########################################################################################
 # STEP 2: Download and Process 2020-to-2010 PUMA Crosswalk
-# ============================================================================
+########################################################################################
 
 message("\n=== Step 2: Processing 2020-to-2010 PUMA Crosswalk ===\n")
 
@@ -171,9 +170,9 @@ puma_2020_to_2010 <- puma_xwalk_raw %>%
 message("Unique 2020 PUMAs with 2010 assignments: ", n_distinct(puma_2020_to_2010$PUMA_2020))
 message("Unique 2010 PUMAs: ", n_distinct(puma_2020_to_2010$PUMA_2010))
 
-# ============================================================================
+########################################################################################
 # STEP 3: Create Combined ZIP-to-PUMA Crosswalk
-# ============================================================================
+########################################################################################
 
 message("\n=== Step 3: Creating Combined Crosswalk ===\n")
 
@@ -191,9 +190,9 @@ message("ZIPs with both 2020 and 2010 PUMAs: ",
 message("\nCrosswalk preview:")
 print(head(zip_to_puma, 10))
 
-# ============================================================================
+########################################################################################
 # STEP 4: Load and Process H-1B Data
-# ============================================================================
+########################################################################################
 
 message("\n=== Step 4: Loading H-1B Petition Data ===\n")
 
@@ -215,9 +214,9 @@ message("Records with valid 5-digit worksite ZIP: ",
 message("Records with missing/invalid worksite ZIP: ",
         sum(is.na(h1b_data$worksite_zip5)))
 
-# ============================================================================
+########################################################################################
 # STEP 5: Join PUMA Codes to H-1B Data
-# ============================================================================
+########################################################################################
 
 message("\n=== Step 5: Joining PUMA Codes ===\n")
 
@@ -252,9 +251,9 @@ if (nrow(unmatched_zips) > 0) {
   print(head(unmatched_zips, 10))
 }
 
-# ============================================================================
+########################################################################################
 # STEP 6: Create State-PUMA Codes (Standard Format)
-# ============================================================================
+########################################################################################
 
 message("\n=== Step 6: Creating State-PUMA Codes ===\n")
 
@@ -281,9 +280,9 @@ message("State-PUMA codes created")
 message("Unique 2020 state-PUMA combinations: ", n_distinct(h1b_with_pumas$PUMA_2020, na.rm = TRUE))
 message("Unique 2010 state-PUMA combinations: ", n_distinct(h1b_with_pumas$PUMA_2010, na.rm = TRUE))
 
-# ============================================================================
+########################################################################################
 # STEP 7: Save Output
-# ============================================================================
+########################################################################################
 
 message("\n=== Step 7: Saving Output ===\n")
 
@@ -302,9 +301,9 @@ message("Output saved to: ", output_file)
 message("Output rows: ", nrow(output_data))
 message("Output columns: ", ncol(output_data))
 
-# ============================================================================
+########################################################################################
 # STEP 8: Final Summary
-# ============================================================================
+########################################################################################
 
 message("\n")
 message("=" %>% rep(70) %>% paste(collapse = ""))
