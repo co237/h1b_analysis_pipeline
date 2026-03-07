@@ -48,9 +48,11 @@ required_packages <- c(
   # String matching
   "fuzzyjoin",
   # Visualization and formatting
-  "ggplot2", "scales", "knitr",
-  # Statistics
-  "matrixStats"
+  "ggplot2", "scales", "gridExtra", "knitr",
+  # Statistics and modeling
+  "fixest", "Hmisc", "matrixStats",
+  # Tidyverse utilities
+  "forcats", "lubridate", "tibble"
 )
 
 missing_packages <- character(0)

@@ -46,7 +46,7 @@ if (is.null(project_root) || project_root == "" || !dir.exists(project_root)) {
 if (is.null(project_root) || project_root == "" || !dir.exists(project_root)) {
   stop("Cannot determine project root directory. Please:\n",
        "  1. Open the .Rproj file in RStudio, OR\n",
-       "  2. Set working directory: setwd('path/to/dol-nprm-analysis')")
+       "  2. Set working directory: setwd('path/to/h1b_analysis_pipeline')")
 }
 
 # Main data directories

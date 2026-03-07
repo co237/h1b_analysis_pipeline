@@ -32,8 +32,11 @@ This project reconstructs the universe of H-1B petitions filed in FY 2022-2024 a
 
 2. **Install R packages**
    ```r
-   install.packages(c("dplyr", "tidyr", "readr", "readxl", "ipumsr",
-                      "stringr", "sf", "tidygeocoder", "fixest", "Hmisc"))
+   install.packages(c("dplyr", "tidyr", "readr", "purrr", "stringr",
+                      "readxl", "ipumsr", "tidygeocoder", "sf", "tidycensus",
+                      "fuzzyjoin", "ggplot2", "scales", "gridExtra", "knitr",
+                      "fixest", "Hmisc", "matrixStats",
+                      "forcats", "lubridate", "tibble"))
    ```
 
 3. **Obtain required data** (see `DATA_SOURCES.md` for detailed instructions)

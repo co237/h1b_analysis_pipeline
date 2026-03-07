@@ -38,7 +38,7 @@ if (file.exists("config.R")) {
   source("../config.R")
 } else {
   stop("Cannot find config.R. Please make sure your working directory is set to the project root:\n",
-       "  setwd('/Users/connorobrien/Documents/GitHub/dol-nprm-analysis')")
+       "  setwd('path/to/h1b_analysis_pipeline')")
 }
 
 # load libraries
