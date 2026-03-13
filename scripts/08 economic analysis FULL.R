@@ -2,7 +2,7 @@
 # Script 08: Economic Analysis of H-1B Prevailing Wage Policies (FULL VERSION)
 #
 # PURPOSE & METHODOLOGY:
-# This script generates a comprehensive 58-page PDF analyzing different H-1B
+# This script generates a comprehensive 59-page PDF analyzing different H-1B
 # prevailing wage policy proposals. It compares four policy scenarios:
 #
 # 1. STATUS QUO: Current OFLC wage levels (Level I-IV)
@@ -31,7 +31,7 @@
 # - Pages 29-34: Industry and Occupation composition analyses
 # - Pages 35-40: Lifetime Earnings analyses (using NPV multipliers from Script 09)
 # - Pages 41-44: Policy comparison analyses (underpayment by industry/occupation)
-# - Pages 45-58: Firm Type and Education Level analyses (new for launch paper)
+# - Pages 45-59: Firm Type and Education Level analyses (new for launch paper)
 #
 # KEY CONCEPTS:
 # - Eligible Population: Workers who meet the policy's wage threshold
@@ -42,7 +42,7 @@
 #
 # Input:  data/processed/h1b_with_lifetime_earnings.csv
 #         (Output from Script 07 - includes age, pw_p50, lifetime earnings)
-# Output: output/analysis/economic_analysis.pdf (58 pages)
+# Output: output/analysis/economic_analysis.pdf (59 pages)
 #
 # Author: Institute for Progress
 # Date: March 2026
@@ -3293,6 +3293,46 @@ p44 <- ggplot(data.frame(
   theme_ifp()
 
 ################################################################################
+# ANALYSIS 4B: Share of Underpaid Petitions - H-1B Dependent vs All Other
+################################################################################
+
+cat("\n--- Analysis 4B: Share Underpaid - H-1B Dependent vs All Other ---\n")
+
+underpaid_share_h1b_vs_other <- h1b_policy %>%
+  filter(underpaid) %>%
+  mutate(
+    firm_category = case_when(
+      is_h1b_dependent == TRUE ~ "H-1B Dependent",
+      TRUE ~ "All Other"
+    )
+  ) %>%
+  group_by(firm_category) %>%
+  summarise(
+    n = n(),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    pct_share = 100 * n / sum(n)
+  )
+
+cat(sprintf("Total underpaid petitions: %s\n", format(sum(underpaid_share_h1b_vs_other$n), big.mark = ",")))
+print(underpaid_share_h1b_vs_other)
+
+p44b <- ggplot(underpaid_share_h1b_vs_other, aes(x = firm_category, y = pct_share)) +
+  geom_col(fill = ifp_colors$red) +
+  geom_text(aes(label = sprintf("%.1f%%", pct_share)),
+            vjust = -0.5, size = 4, color = ifp_colors$rich_black) +
+  scale_y_continuous(labels = label_percent(scale = 1),
+                     expand = expansion(mult = c(0, 0.15))) +
+  labs(
+    title = "Share of Underpaid Petitions: H-1B Dependent vs All Other",
+    subtitle = "Distribution of all underpaid petitions across firm types",
+    x = NULL,
+    y = "Share of Underpaid Petitions (%)"
+  ) +
+  theme_ifp()
+
+################################################################################
 # ANALYSIS 5: Median Wage Premium by Firm Type (All Petitions)
 # H-1B Dependent vs All Other
 ################################################################################
@@ -3654,38 +3694,41 @@ print(p43)
 # Page 49: Underpaid petition composition by firm type
 print(p44)
 
-# Page 50: Median underpayment ($) by firm type
+# Page 50: Share underpaid - H-1B dependent vs all other
+print(p44b)
+
+# Page 51: Median wage premium ($) by firm type
 print(p45)
 
-# Page 51: Median underpayment (%) by firm type
+# Page 52: Median wage premium (%) by firm type
 print(p46)
 
-# Page 52: Eligibility rates by firm type and policy
+# Page 53: Eligibility rates by firm type and policy
 print(p47)
 
-# Page 53: Underpayment rate by education level
+# Page 54: Underpayment rate by education level
 print(p48)
 
-# Page 54: Median wage premium by education level
+# Page 55: Median wage premium by education level
 print(p49)
 
-# Page 55: Underpayment rate by education and firm type
+# Page 56: Underpayment rate by education and firm type
 print(p50)
 
-# Page 56: Median wage premium by education and firm type
+# Page 57: Median wage premium by education and firm type
 print(p51)
 
-# Page 57: Median wage premium by top 10 industries
+# Page 58: Median wage premium by top 10 industries
 print(p52)
 
-# Page 58: Median wage premium by top 10 occupations
+# Page 59: Median wage premium by top 10 occupations
 print(p53)
 
 dev.off()
 
 cat("\n=== Analysis Complete ===\n")
 cat("Output saved to: output/analysis/economic_analysis.pdf\n")
-cat("Total pages: 58\n")
+cat("Total pages: 59\n")
 cat("\nPage 1: Overall Summary\n")
 cat("Pages 2-3: Scatterplots (Salary vs Wage Premium)\n")
 cat("Pages 4-20: Eligible Population Analyses\n")
@@ -3696,18 +3739,19 @@ cat("Pages 21-28: Weighted Lottery Simulation Analyses\n")
 cat("Pages 29-34: Industry and Occupation Analyses\n")
 cat("Pages 35-40: Lifetime Earnings Analyses\n")
 cat("Pages 41-44: Underpayment by Industry/Occupation (Policy Comparisons)\n")
-cat("Pages 45-58: Firm Type and Education Level Analyses\n")
+cat("Pages 45-59: Firm Type and Education Level Analyses\n")
 cat("  Page 45: Underpayment Rate by Firm Type (3 bars)\n")
 cat("  Page 46: Petition Composition by Firm Type and Policy\n")
 cat("  Page 47: IT Outsourcer Share by Policy\n")
 cat("  Page 48: H-1B Dependent Share by Policy\n")
-cat("  Page 49: Underpaid Petition Composition by Firm Type\n")
-cat("  Page 50: Median Wage Premium ($) by Firm Type (All Petitions)\n")
-cat("  Page 51: Median Wage Premium (%) by Firm Type (All Petitions)\n")
-cat("  Page 52: Eligibility Rates by Firm Type and Policy\n")
-cat("  Page 53: Underpayment Rate by Education Level (Bachelor's+)\n")
-cat("  Page 54: Median Wage Premium by Education Level (Bachelor's+)\n")
-cat("  Page 55: Underpayment by Education and Firm Type (Bachelor's+)\n")
-cat("  Page 56: Wage Premium by Education and Firm Type (Bachelor's+)\n")
-cat("  Page 57: Median Wage Premium by Top 10 Industries\n")
-cat("  Page 58: Median Wage Premium by Top 10 Occupations\n")
+cat("  Page 49: Underpaid Petition Composition by Firm Type (3 bars)\n")
+cat("  Page 50: Share Underpaid - H-1B Dependent vs All Other (2 bars)\n")
+cat("  Page 51: Median Wage Premium ($) - H-1B Dependent vs All Other\n")
+cat("  Page 52: Median Wage Premium (%) - H-1B Dependent vs All Other\n")
+cat("  Page 53: Eligibility Rates by Firm Type and Policy\n")
+cat("  Page 54: Underpayment Rate by Education Level (Bachelor's+)\n")
+cat("  Page 55: Median Wage Premium by Education Level (Bachelor's+)\n")
+cat("  Page 56: Underpayment by Education and Firm Type (Bachelor's+)\n")
+cat("  Page 57: Wage Premium by Education and Firm Type (Bachelor's+)\n")
+cat("  Page 58: Median Wage Premium by Top 10 Industries\n")
+cat("  Page 59: Median Wage Premium by Top 10 Occupations\n")
