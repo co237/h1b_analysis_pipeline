@@ -26,20 +26,19 @@
 #    - Zero underpayment by definition (eligible only if meeting threshold)
 #
 # ANALYSIS STRUCTURE:
-# - Pages 1-22: Eligible Population analyses (who can apply under each policy)
-#   - Includes scatterplots for 2021 Rule and 2026 Rule eligibility
-#   - False positive/negative analyses by salary threshold
-# - Pages 23-28: Industry and Occupation composition analyses
-# - Pages 29-31: Lifetime Earnings analyses (using NPV multipliers from Script 09)
-# - Pages 32-33: Policy comparison analyses (underpayment by industry/occupation)
-# - Pages 34-48: Firm Type and Education Level analyses (new for launch paper)
+# - Pages 1-20: Eligible Population analyses (who can apply under each policy)
+# - Pages 21-28: Weighted Lottery simulation (who gets selected under weighted lottery)
+# - Pages 29-34: Industry and Occupation composition analyses
+# - Pages 35-40: Lifetime Earnings analyses (using NPV multipliers from Script 09)
+# - Pages 41-44: Policy comparison analyses (underpayment by industry/occupation)
+# - Pages 45-59: Firm Type and Education Level analyses (new for launch paper)
 #
 # KEY CONCEPTS:
 # - Eligible Population: Workers who meet the policy's wage threshold
 # - Underpaid: Workers paid less than pw_p50 (similarly-qualified Americans)
 # - Wage Premium: % above/below pw_p50
-# - False Positives: High-earning workers excluded by policy thresholds
-# - False Negatives: Underpaid workers still eligible under policy
+# - Weighted Lottery: Simulation where higher-paid workers get more lottery entries
+#   (1 entry at minimum, up to 4 entries at highest thresholds)
 #
 # Input:  data/processed/h1b_with_lifetime_earnings.csv
 #         (Output from Script 07 - includes age, pw_p50, lifetime earnings)
@@ -1871,6 +1870,72 @@ p26 <- ggplot(industry_mix_eligible_labeled, aes(x = reorder(industry_label_with
   theme(strip.text = element_text(face = "bold", size = 9))
 
 ################################################################################
+# ANALYSIS 26: Industry Mix - Weighted Lottery
+################################################################################
+
+cat("\n=== Analysis 26: Industry Mix - Weighted Lottery ===\n")
+
+# Calculate weighted industry distribution for lottery simulation
+# Use same top 10 industries as eligible population
+industry_mix_lottery <- h1b_lottery %>%
+  filter(!is.na(petition_employer_naics)) %>%
+  mutate(
+    industry_label = case_when(
+      !petition_employer_naics %in% top_10_industries ~ "All Other",
+      petition_employer_naics == "541511" ~ "Custom Computer Programming",
+      petition_employer_naics == "541512" ~ "Computer Systems Design",
+      petition_employer_naics == "511210" ~ "Software Publishers",
+      petition_employer_naics == "54151" ~ "Computer Systems Design",
+      petition_employer_naics == "45411" ~ "Electronic Shopping",
+      petition_employer_naics == "518210" ~ "Data Processing/Hosting",
+      petition_employer_naics == "541330" ~ "Engineering Services",
+      petition_employer_naics == "541519" ~ "Other Computer Services",
+      petition_employer_naics == "999999" ~ "Unknown/Not Specified",
+      petition_employer_naics == "523110" ~ "Investment Banking",
+      TRUE ~ paste0("NAICS ", petition_employer_naics)
+    )
+  ) %>%
+  pivot_longer(
+    cols = c(weight_status_quo, weight_2021, weight_eb),
+    names_to = "policy",
+    values_to = "weight"
+  ) %>%
+  filter(weight > 0) %>%
+  mutate(
+    policy = factor(case_when(
+      policy == "weight_status_quo" ~ "Status Quo",
+      policy == "weight_2021" ~ "2021 Rule",
+      policy == "weight_eb" ~ "Experience Benchmarking"
+    ), levels = c("Status Quo", "2021 Rule", "Experience Benchmarking"))
+  )
+
+# Expand by weight and calculate distribution
+industry_mix_lottery_expanded <- industry_mix_lottery %>%
+  uncount(weights = weight) %>%
+  group_by(policy, industry_label) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(policy) %>%
+  mutate(pct = (n / sum(n)) * 100) %>%
+  ungroup()
+
+print(industry_mix_lottery_expanded %>% arrange(policy, desc(pct)))
+
+p27 <- ggplot(industry_mix_lottery_expanded, aes(x = reorder(industry_label, pct), y = pct)) +
+  geom_col(fill = ifp_colors$dark_blue) +
+  coord_flip() +
+  facet_wrap(~policy, ncol = 1, scales = "free_y") +
+  scale_y_continuous(labels = label_percent(scale = 1),
+                     expand = expansion(mult = c(0, 0.1))) +
+  labs(
+    title = "Weighted Lottery Simulation: Industry Mix (Top 10 Industries)",
+    subtitle = "Share of lottery winners in each industry (weighted by entries)",
+    x = NULL,
+    y = "Share (%)"
+  ) +
+  theme_ifp() +
+  theme(strip.text = element_text(face = "bold", size = 10))
+
+################################################################################
 # ANALYSIS 27: Occupation Mix - Eligible Population
 ################################################################################
 
@@ -1936,6 +2001,61 @@ p28 <- ggplot(occupation_mix_eligible_labeled, aes(x = reorder(occupation_label_
   theme(strip.text = element_text(face = "bold", size = 9))
 
 ################################################################################
+# ANALYSIS 28: Occupation Mix - Weighted Lottery
+################################################################################
+
+cat("\n=== Analysis 28: Occupation Mix - Weighted Lottery ===\n")
+
+# Calculate weighted occupation distribution for lottery simulation
+# Use same top 10 occupations as eligible population
+occupation_mix_lottery <- h1b_lottery %>%
+  filter(!is.na(SOC_TITLE)) %>%
+  mutate(
+    occupation_label = if_else(
+      SOC_TITLE %in% top_10_occupations,
+      str_to_title(SOC_TITLE),
+      "All Other"
+    )
+  ) %>%
+  pivot_longer(
+    cols = c(weight_status_quo, weight_2021, weight_eb),
+    names_to = "policy",
+    values_to = "weight"
+  ) %>%
+  filter(weight > 0) %>%
+  mutate(
+    policy = factor(case_when(
+      policy == "weight_status_quo" ~ "Status Quo",
+      policy == "weight_2021" ~ "2021 Rule",
+      policy == "weight_eb" ~ "Experience Benchmarking"
+    ), levels = c("Status Quo", "2021 Rule", "Experience Benchmarking"))
+  )
+
+# Expand by weight and calculate distribution
+occupation_mix_lottery_expanded <- occupation_mix_lottery %>%
+  uncount(weights = weight) %>%
+  group_by(policy, occupation_label) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(policy) %>%
+  mutate(pct = (n / sum(n)) * 100) %>%
+  ungroup()
+
+print(occupation_mix_lottery_expanded %>% arrange(policy, desc(pct)))
+
+p29 <- ggplot(occupation_mix_lottery_expanded, aes(x = reorder(occupation_label, pct), y = pct)) +
+  geom_col(fill = ifp_colors$dark_blue) +
+  coord_flip() +
+  facet_wrap(~policy, ncol = 1, scales = "free_y") +
+  scale_y_continuous(labels = label_percent(scale = 1),
+                     expand = expansion(mult = c(0, 0.1))) +
+  labs(
+    title = "Weighted Lottery Simulation: Occupation Mix (Top 10 Occupations)",
+    subtitle = "Share of lottery winners in each occupation (weighted by entries)",
+    x = NULL,
+    y = "Share (%)"
+  ) +
+  theme_ifp() +
+  theme(strip.text = element_text(face = "bold", size = 10))
 
 ################################################################################
 # ANALYSIS 29-35: LIFETIME EARNINGS ANALYSES
@@ -2049,6 +2169,93 @@ p32 <- ggplot(lifetime_eligible_stats, aes(x = policy, y = median_lifetime_7pct)
   labs(
     title = "Eligible Population: Median Expected Lifetime Earnings",
     subtitle = "Using 7% discount rate",
+    x = NULL,
+    y = "Median Lifetime Earnings"
+  ) +
+  theme_ifp() +
+  theme(axis.text.x = element_text(angle = 20, hjust = 1))
+
+################################################################################
+# ANALYSIS 30: Lifetime Earnings - Weighted Lottery by Policy
+################################################################################
+
+cat("\n=== Analysis 30: Lifetime Earnings - Weighted Lottery ===\n")
+
+# Calculate weighted median/mean lifetime earnings for lottery simulation
+lifetime_lottery_data <- h1b_lottery %>%
+  filter(!is.na(lifetime_earnings_3pct), !is.na(lifetime_earnings_7pct)) %>%
+  pivot_longer(
+    cols = c(weight_status_quo, weight_2021, weight_eb),
+    names_to = "policy",
+    values_to = "weight"
+  ) %>%
+  filter(weight > 0) %>%
+  mutate(
+    policy = factor(case_when(
+      policy == "weight_status_quo" ~ "Status Quo",
+      policy == "weight_2021" ~ "2021 Rule",
+      policy == "weight_eb" ~ "Experience Benchmarking"
+    ), levels = c("Status Quo", "2021 Rule", "Experience Benchmarking"))
+  )
+
+# Expand by weight and calculate statistics
+lifetime_lottery_expanded <- lifetime_lottery_data %>%
+  uncount(weights = weight)
+
+lifetime_lottery_stats <- lifetime_lottery_expanded %>%
+  group_by(policy) %>%
+  summarise(
+    median_lifetime_3pct = median(lifetime_earnings_3pct, na.rm = TRUE),
+    mean_lifetime_3pct = mean(lifetime_earnings_3pct, na.rm = TRUE),
+    median_lifetime_7pct = median(lifetime_earnings_7pct, na.rm = TRUE),
+    mean_lifetime_7pct = mean(lifetime_earnings_7pct, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+print(lifetime_lottery_stats)
+
+# Median lifetime earnings - lottery (3% discount)
+p33 <- ggplot(lifetime_lottery_stats, aes(x = policy, y = median_lifetime_3pct)) +
+  geom_col(fill = ifp_colors$dark_blue) +
+  geom_text(aes(label = paste0("$", round(median_lifetime_3pct / 1e6, 2), "M")),
+            vjust = -0.5, size = 4, color = ifp_colors$rich_black) +
+  scale_y_continuous(labels = label_dollar(scale = 1/1e6, suffix = "M"),
+                     expand = expansion(mult = c(0, 0.15))) +
+  labs(
+    title = "Weighted Lottery Simulation: Median Expected Lifetime Earnings",
+    subtitle = "Using 3% discount rate (weighted by lottery entries)",
+    x = NULL,
+    y = "Median Lifetime Earnings"
+  ) +
+  theme_ifp() +
+  theme(axis.text.x = element_text(angle = 20, hjust = 1))
+
+# Mean lifetime earnings - lottery (3% discount)
+p34 <- ggplot(lifetime_lottery_stats, aes(x = policy, y = mean_lifetime_3pct)) +
+  geom_col(fill = ifp_colors$purple) +
+  geom_text(aes(label = paste0("$", round(mean_lifetime_3pct / 1e6, 2), "M")),
+            vjust = -0.5, size = 4, color = ifp_colors$rich_black) +
+  scale_y_continuous(labels = label_dollar(scale = 1/1e6, suffix = "M"),
+                     expand = expansion(mult = c(0, 0.15))) +
+  labs(
+    title = "Weighted Lottery Simulation: Mean Expected Lifetime Earnings",
+    subtitle = "Using 3% discount rate (weighted by lottery entries)",
+    x = NULL,
+    y = "Mean Lifetime Earnings"
+  ) +
+  theme_ifp() +
+  theme(axis.text.x = element_text(angle = 20, hjust = 1))
+
+# Median lifetime earnings - lottery (7% discount)
+p35 <- ggplot(lifetime_lottery_stats, aes(x = policy, y = median_lifetime_7pct)) +
+  geom_col(fill = ifp_colors$dark_blue) +
+  geom_text(aes(label = paste0("$", round(median_lifetime_7pct / 1e6, 2), "M")),
+            vjust = -0.5, size = 4, color = ifp_colors$rich_black) +
+  scale_y_continuous(labels = label_dollar(scale = 1/1e6, suffix = "M"),
+                     expand = expansion(mult = c(0, 0.15))) +
+  labs(
+    title = "Weighted Lottery Simulation: Median Expected Lifetime Earnings",
+    subtitle = "Using 7% discount rate (weighted by lottery entries)",
     x = NULL,
     y = "Median Lifetime Earnings"
   ) +
@@ -2265,6 +2472,88 @@ p38 <- ggplot(occupation_underpay_policy, aes(x = occupation_label_with_n, y = p
   theme(legend.position = "bottom")
 
 ################################################################################
+# ANALYSIS 34: Underpayment by Occupation - Weighted Lottery (Policy Comparison)
+################################################################################
+
+cat("\n=== Analysis 34: Underpayment by Occupation - Weighted Lottery (Policy Comparison) ===\n")
+
+# Calculate weighted underpayment rates by occupation for each policy
+occupation_underpay_lottery <- h1b_lottery %>%
+  filter(!is.na(SOC_TITLE)) %>%
+  mutate(
+    occupation_label = if_else(
+      SOC_TITLE %in% top_10_occupations,
+      str_to_title(str_wrap(SOC_TITLE, width = 25)),
+      "All Other"
+    ),
+    is_underpaid = petition_annual_pay_clean < pw_p50
+  ) %>%
+  pivot_longer(
+    cols = c(weight_status_quo, weight_2021, weight_eb),
+    names_to = "policy",
+    values_to = "weight"
+  ) %>%
+  filter(weight > 0) %>%
+  mutate(
+    policy = factor(case_when(
+      policy == "weight_status_quo" ~ "Status Quo",
+      policy == "weight_2021" ~ "2021 Rule",
+      policy == "weight_eb" ~ "Experience Benchmarking"
+    ), levels = c("Status Quo", "2021 Rule", "Experience Benchmarking"))
+  )
+
+# Expand by weight and calculate underpayment rates
+occupation_underpay_lottery_expanded <- occupation_underpay_lottery %>%
+  uncount(weights = weight) %>%
+  group_by(policy, occupation_label) %>%
+  summarise(
+    n = n(),
+    n_underpaid = sum(is_underpaid, na.rm = TRUE),
+    pct_underpaid = mean(is_underpaid, na.rm = TRUE) * 100,
+    .groups = "drop"
+  ) %>%
+  filter(n >= 100)  # Only occupations with sufficient sample
+
+print(occupation_underpay_lottery_expanded %>% arrange(occupation_label, policy))
+
+# Add display column with minimum height for 0% bars (so they're visible)
+# Sort by occupation size (Status Quo count) with "All Other" always at bottom (after coord_flip)
+occupation_underpay_lottery_expanded <- occupation_underpay_lottery_expanded %>%
+  mutate(pct_display = pmax(pct_underpaid, 0.5)) %>%  # 0% shows as 0.5% sliver
+  group_by(occupation_label) %>%
+  mutate(occupation_size = max(n[policy == "Status Quo"], na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(
+    # Create sort key: "All Other" gets -Inf (first), others by size ascending
+    # After coord_flip: first level = bottom, last level = top
+    sort_order = ifelse(occupation_label == "All Other", -Inf, occupation_size),
+    occupation_label = factor(occupation_label,
+                             levels = unique(occupation_label[order(sort_order)]))
+  )
+
+p39 <- ggplot(occupation_underpay_lottery_expanded, aes(x = occupation_label, y = pct_display, fill = policy)) +
+  geom_col(position = "dodge") +
+  # Add text labels showing actual percentages (whole numbers)
+  geom_text(aes(label = sprintf("%.0f%%", pct_underpaid), y = pct_underpaid),
+            position = position_dodge(width = 0.9),
+            hjust = -0.1, size = 3, color = ifp_colors$rich_black) +
+  scale_fill_manual(values = c(
+    "Status Quo" = ifp_colors$rich_black,
+    "2021 Rule" = ifp_colors$purple,
+    "Experience Benchmarking" = ifp_colors$dark_blue
+  )) +
+  scale_y_continuous(labels = label_percent(scale = 1),
+                     expand = expansion(mult = c(0, 0.15))) +  # More space for labels
+  labs(
+    title = "Weighted Lottery Simulation: Underpayment Rates by Occupation and Policy",
+    subtitle = "Percentage of lottery winners paid less than similarly-qualified Americans (0% = no underpayment)",
+    x = NULL,
+    y = "Underpaid (%)",
+    fill = "Policy"
+  ) +
+  coord_flip() +
+  theme_ifp() +
+  theme(legend.position = "bottom")
 
 ################################################################################
 # PDF EXPORT
@@ -2340,10 +2629,7 @@ print(p2)
 # Page 3: Scatterplot colored by 2021 Rule eligibility
 print(p2a)
 
-# Page 4: Scatterplot colored by 2026 Rule eligibility
-print(p2b)
-
-# Page 5: Underpayment by age cohort (20-29, 30-39, 40-49, 50-59)
+# Page 4: Underpayment by age cohort (20-29, 30-39, 40-49, 50-59)
 print(p3)
 
 # Page 5: Underpayment by 5-year age group
@@ -2402,38 +2688,77 @@ print(p14)
 # Page 20: Eligible population - PhD share by policy
 print(p15)
 
-# Page 21: False positives by salary threshold
-print(p7a)
+# Page 21: Weighted lottery - median salary by year
+print(p16)
 
-# Page 22: False negatives by salary threshold
-print(p7b)
+# Page 22: Weighted lottery - mean salary by year
+print(p17)
 
-# Page 23: Underpayment by top 10 industries (eligible population)
+# Page 23: Weighted lottery - age distribution
+print(p18)
+
+# Page 24: Weighted lottery - median wage premium ($) by year
+print(p19)
+
+# Page 25: Weighted lottery - median wage premium (%) by year
+print(p20)
+
+# Page 26: Weighted lottery - PhD share
+print(p21)
+
+# Page 27: Weighted lottery - share with prior F-1 status
+print(p22)
+
+# Page 28: Weighted lottery - share underpaid
+print(p23)
+
+# Page 29: Underpayment by top 10 industries (eligible population)
 print(p24)
 
-# Page 24: Underpayment by top 10 occupations (eligible population)
+# Page 30: Underpayment by top 10 occupations (eligible population)
 print(p25)
 
-# Page 25: Industry mix - eligible population
+# Page 31: Industry mix - eligible population
 print(p26)
 
-# Page 26: Occupation mix - eligible population
+# Page 32: Industry mix - weighted lottery
+print(p27)
+
+# Page 33: Occupation mix - eligible population
 print(p28)
 
-# Page 27: Median lifetime earnings - eligible population (3% discount)
+# Page 34: Occupation mix - weighted lottery
+print(p29)
+
+# Page 35: Median lifetime earnings - eligible population (3% discount)
 print(p30)
 
-# Page 28: Mean lifetime earnings - eligible population (3% discount)
+# Page 36: Mean lifetime earnings - eligible population (3% discount)
 print(p31)
 
-# Page 29: Median lifetime earnings - eligible population (7% discount)
+# Page 37: Median lifetime earnings - eligible population (7% discount)
 print(p32)
 
-# Page 30: Underpayment by industry - eligible population (policy comparison)
+# Page 38: Median lifetime earnings - weighted lottery (3% discount)
+print(p33)
+
+# Page 39: Mean lifetime earnings - weighted lottery (3% discount)
+print(p34)
+
+# Page 40: Median lifetime earnings - weighted lottery (7% discount)
+print(p35)
+
+# Page 41: Underpayment by industry - eligible population (policy comparison)
 print(p36)
 
-# Page 31: Underpayment by occupation - eligible population (policy comparison)
+# Page 42: Underpayment by industry - weighted lottery (policy comparison)
+print(p37)
+
+# Page 43: Underpayment by occupation - eligible population (policy comparison)
 print(p38)
+
+# Page 44: Underpayment by occupation - weighted lottery (policy comparison)
+print(p39)
 
 ################################################################################
 # NEW ANALYSES: FIRM TYPE AND EDUCATION LEVEL
@@ -3085,18 +3410,16 @@ cat("\n=== Analysis Complete ===\n")
 cat("Output saved to: output/analysis/economic_analysis.pdf\n")
 cat("Total pages: 59\n")
 cat("\nPage 1: Overall Summary\n")
-cat("Pages 2-4: Scatterplots (Salary vs Wage Premium by 2021 and 2026 Rule Eligibility)\n")
-cat("Pages 5-20: Eligible Population Analyses\n")
+cat("Pages 2-3: Scatterplots (Salary vs Wage Premium)\n")
+cat("Pages 4-20: Eligible Population Analyses\n")
 cat("  Pages 15-16: Salary Comparison Tables (Status Quo vs Experience Benchmarking)\n")
 cat("  Page 17: Underpayment by Prior Visa Status (Top 5)\n")
 cat("  Page 18: Underpayment F-1 vs All Others\n")
-cat("Pages 21-22: False Positive/Negative Tables by Salary Threshold\n")
-cat("Pages 23-28: Industry and Occupation Analyses\n")
-cat("  Pages 23-24: Underpayment by Top 10 Industries/Occupations\n")
-cat("  Pages 25-28: Industry/Occupation Mix by Policy\n")
-cat("Pages 29-31: Lifetime Earnings Analyses (3% and 7% discount rates)\n")
-cat("Pages 32-33: Underpayment by Industry/Occupation (Policy Comparisons)\n")
-cat("Pages 34-48: Firm Type and Education Level Analyses\n")
+cat("Pages 21-28: Weighted Lottery Simulation Analyses\n")
+cat("Pages 29-34: Industry and Occupation Analyses\n")
+cat("Pages 35-40: Lifetime Earnings Analyses\n")
+cat("Pages 41-44: Underpayment by Industry/Occupation (Policy Comparisons)\n")
+cat("Pages 45-59: Firm Type and Education Level Analyses\n")
 cat("  Page 45: Underpayment Rate by Firm Type (3 bars)\n")
 cat("  Page 46: Petition Composition by Firm Type and Policy\n")
 cat("  Page 47: IT Outsourcer Share by Policy\n")
