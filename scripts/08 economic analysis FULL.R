@@ -2,7 +2,7 @@
 # Script 08: Economic Analysis of H-1B Prevailing Wage Policies (FULL VERSION)
 #
 # PURPOSE & METHODOLOGY:
-# This script generates a comprehensive 56-page PDF analyzing different H-1B
+# This script generates a comprehensive 58-page PDF analyzing different H-1B
 # prevailing wage policy proposals. It compares four policy scenarios:
 #
 # 1. STATUS QUO: Current OFLC wage levels (Level I-IV)
@@ -31,7 +31,7 @@
 # - Pages 29-34: Industry and Occupation composition analyses
 # - Pages 35-40: Lifetime Earnings analyses (using NPV multipliers from Script 09)
 # - Pages 41-44: Policy comparison analyses (underpayment by industry/occupation)
-# - Pages 45-56: Firm Type and Education Level analyses (new for launch paper)
+# - Pages 45-58: Firm Type and Education Level analyses (new for launch paper)
 #
 # KEY CONCEPTS:
 # - Eligible Population: Workers who meet the policy's wage threshold
@@ -42,7 +42,7 @@
 #
 # Input:  data/processed/h1b_with_lifetime_earnings.csv
 #         (Output from Script 07 - includes age, pw_p50, lifetime earnings)
-# Output: output/analysis/economic_analysis.pdf (56 pages)
+# Output: output/analysis/economic_analysis.pdf (58 pages)
 #
 # Author: Institute for Progress
 # Date: March 2026
@@ -3122,21 +3122,24 @@ cat(sprintf("  Underpaid: %s (%.1f%%)\n",
             h1b_dependent_stats$pct_underpaid))
 cat(sprintf("  Median wage premium: %.1f%%\n", h1b_dependent_stats$median_wage_premium))
 
-# Create bar chart
-p40 <- ggplot(data.frame(
-  firm_type = c("H-1B Dependent", "All Other Firms"),
-  pct_underpaid = c(
-    h1b_dependent_stats$pct_underpaid,
-    100 * mean(h1b_policy$underpaid[!h1b_policy$is_h1b_dependent], na.rm = TRUE)
+# Create bar chart with all three firm types
+underpayment_by_firm_type <- h1b_policy %>%
+  group_by(firm_type) %>%
+  summarise(
+    n = n(),
+    n_underpaid = sum(underpaid, na.rm = TRUE),
+    pct_underpaid = 100 * mean(underpaid, na.rm = TRUE),
+    .groups = "drop"
   )
-), aes(x = firm_type, y = pct_underpaid)) +
+
+p40 <- ggplot(underpayment_by_firm_type, aes(x = firm_type, y = pct_underpaid)) +
   geom_col(fill = ifp_colors$dark_blue) +
   geom_text(aes(label = sprintf("%.1f%%", pct_underpaid)),
             vjust = -0.5, size = 4, color = ifp_colors$rich_black) +
   scale_y_continuous(labels = label_percent(scale = 1),
                      expand = expansion(mult = c(0, 0.15))) +
   labs(
-    title = "Underpayment Rate: H-1B Dependent vs Other Firms",
+    title = "Underpayment Rate by Firm Type",
     subtitle = "Percentage of workers paid less than similarly-qualified Americans",
     x = NULL,
     y = "Underpaid (%)"
@@ -3290,48 +3293,53 @@ p44 <- ggplot(data.frame(
   theme_ifp()
 
 ################################################################################
-# ANALYSIS 5: Median Underpayment Rate by Firm Type
+# ANALYSIS 5: Median Wage Premium by Firm Type (All Petitions)
 ################################################################################
 
-cat("\n--- Analysis 5: Median Underpayment by Firm Type ---\n")
+cat("\n--- Analysis 5: Median Wage Premium by Firm Type ---\n")
 
-median_underpayment_by_firm <- h1b_policy %>%
-  filter(underpaid) %>%
+median_premium_by_firm <- h1b_policy %>%
   group_by(firm_type) %>%
   summarise(
     n = n(),
-    median_underpayment_dollars = median(pw_p50 - petition_annual_pay_clean, na.rm = TRUE),
-    median_underpayment_pct = median(-wage_premium_pct, na.rm = TRUE),
+    median_premium_dollars = median(petition_annual_pay_clean - pw_p50, na.rm = TRUE),
+    median_premium_pct = median(wage_premium_pct, na.rm = TRUE),
     .groups = "drop"
   )
 
-print(median_underpayment_by_firm)
+print(median_premium_by_firm)
 
-p45 <- ggplot(median_underpayment_by_firm, aes(x = firm_type, y = median_underpayment_dollars)) +
-  geom_col(fill = ifp_colors$red) +
-  geom_text(aes(label = dollar(median_underpayment_dollars, accuracy = 1)),
-            vjust = -0.5, size = 4, color = ifp_colors$rich_black) +
+p45 <- ggplot(median_premium_by_firm, aes(x = firm_type, y = median_premium_dollars)) +
+  geom_col(aes(fill = median_premium_dollars >= 0)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = ifp_colors$rich_black) +
+  geom_text(aes(label = dollar(median_premium_dollars, accuracy = 1)),
+            vjust = ifelse(median_premium_by_firm$median_premium_dollars >= 0, -0.5, 1.5),
+            size = 4, color = ifp_colors$rich_black) +
+  scale_fill_manual(values = c("TRUE" = ifp_colors$green, "FALSE" = ifp_colors$red), guide = "none") +
   scale_y_continuous(labels = dollar_format(),
-                     expand = expansion(mult = c(0, 0.15))) +
+                     expand = expansion(mult = c(0.15, 0.15))) +
   labs(
-    title = "Median Underpayment Among Underpaid Workers by Firm Type",
-    subtitle = "Median dollar shortfall relative to similarly-qualified Americans",
+    title = "Median Wage Premium by Firm Type (All Petitions)",
+    subtitle = "Median dollar difference relative to similarly-qualified Americans (negative = underpaid)",
     x = NULL,
-    y = "Median Underpayment ($)"
+    y = "Median Wage Premium ($)"
   ) +
   theme_ifp()
 
-p46 <- ggplot(median_underpayment_by_firm, aes(x = firm_type, y = median_underpayment_pct)) +
-  geom_col(fill = ifp_colors$red) +
-  geom_text(aes(label = sprintf("%.1f%%", median_underpayment_pct)),
-            vjust = -0.5, size = 4, color = ifp_colors$rich_black) +
+p46 <- ggplot(median_premium_by_firm, aes(x = firm_type, y = median_premium_pct)) +
+  geom_col(aes(fill = median_premium_pct >= 0)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = ifp_colors$rich_black) +
+  geom_text(aes(label = sprintf("%.1f%%", median_premium_pct)),
+            vjust = ifelse(median_premium_by_firm$median_premium_pct >= 0, -0.5, 1.5),
+            size = 4, color = ifp_colors$rich_black) +
+  scale_fill_manual(values = c("TRUE" = ifp_colors$green, "FALSE" = ifp_colors$red), guide = "none") +
   scale_y_continuous(labels = label_percent(scale = 1),
-                     expand = expansion(mult = c(0, 0.15))) +
+                     expand = expansion(mult = c(0.15, 0.15))) +
   labs(
-    title = "Median Underpayment (%) Among Underpaid Workers by Firm Type",
-    subtitle = "Median percentage shortfall relative to similarly-qualified Americans",
+    title = "Median Wage Premium (%) by Firm Type (All Petitions)",
+    subtitle = "Median percentage difference relative to similarly-qualified Americans (negative = underpaid)",
     x = NULL,
-    y = "Median Underpayment (%)"
+    y = "Median Wage Premium (%)"
   ) +
   theme_ifp()
 
@@ -3401,9 +3409,10 @@ p47 <- ggplot(eligibility_long, aes(x = policy, y = pct_eligible, fill = firm_ty
 
 cat("\n--- Analysis 7: Underpayment by Education Level ---\n")
 
-# Calculate underpayment statistics by education
+# Calculate underpayment statistics by education (Bachelor's degree or higher only)
 underpay_by_education <- h1b_policy %>%
-  filter(!is.na(highest_ed)) %>%
+  filter(!is.na(highest_ed),
+         highest_ed %in% c("Bachelors", "Masters", "Prof degree", "PhD")) %>%
   group_by(highest_ed) %>%
   summarise(
     n = n(),
@@ -3414,9 +3423,7 @@ underpay_by_education <- h1b_policy %>%
   ) %>%
   mutate(
     highest_ed = factor(highest_ed,
-                       levels = c("Less than HS", "High school", "Some college",
-                                 "Associates", "Bachelors", "Masters",
-                                 "Prof degree", "PhD"))
+                       levels = c("Bachelors", "Masters", "Prof degree", "PhD"))
   ) %>%
   arrange(highest_ed)
 
@@ -3461,7 +3468,8 @@ p49 <- ggplot(underpay_by_education, aes(x = highest_ed, y = median_wage_premium
 cat("\n--- Analysis 8: Underpayment by Education and Firm Type ---\n")
 
 underpay_by_ed_firm <- h1b_policy %>%
-  filter(!is.na(highest_ed)) %>%
+  filter(!is.na(highest_ed),
+         highest_ed %in% c("Bachelors", "Masters", "Prof degree", "PhD")) %>%
   group_by(highest_ed, firm_type) %>%
   summarise(
     n = n(),
@@ -3472,9 +3480,7 @@ underpay_by_ed_firm <- h1b_policy %>%
   ) %>%
   mutate(
     highest_ed = factor(highest_ed,
-                       levels = c("Less than HS", "High school", "Some college",
-                                 "Associates", "Bachelors", "Masters",
-                                 "Prof degree", "PhD"))
+                       levels = c("Bachelors", "Masters", "Prof degree", "PhD"))
   )
 
 print(underpay_by_ed_firm)
@@ -3517,6 +3523,112 @@ p51 <- ggplot(underpay_by_ed_firm, aes(x = highest_ed, y = median_wage_premium, 
         legend.position = "bottom")
 
 ################################################################################
+# ANALYSIS 9: Median Wage Premium by Top Industries and Occupations
+################################################################################
+
+cat("\n--- Analysis 9: Median Wage Premium by Top Industries and Occupations ---\n")
+
+# Top 10 industries by petition count
+top_industries_for_premium <- h1b_policy %>%
+  filter(eligible_status_quo, !is.na(petition_employer_naics)) %>%
+  dplyr::count(petition_employer_naics, sort = TRUE) %>%
+  head(10) %>%
+  pull(petition_employer_naics)
+
+# Calculate median wage premium by industry
+premium_by_industry <- h1b_policy %>%
+  filter(petition_employer_naics %in% top_industries_for_premium) %>%
+  mutate(
+    industry_label = case_when(
+      petition_employer_naics == "541511" ~ "Custom Computer\nProgramming",
+      petition_employer_naics == "541512" ~ "Computer Systems\nDesign",
+      petition_employer_naics == "511210" ~ "Software\nPublishers",
+      petition_employer_naics == "54151" ~ "Computer Systems\nDesign (54151)",
+      petition_employer_naics == "45411" ~ "Electronic\nShopping",
+      petition_employer_naics == "518210" ~ "Data Processing/\nHosting",
+      petition_employer_naics == "541330" ~ "Engineering\nServices",
+      petition_employer_naics == "541519" ~ "Other Computer\nServices",
+      petition_employer_naics == "999999" ~ "Unknown/\nNot Specified",
+      petition_employer_naics == "523110" ~ "Investment\nBanking",
+      TRUE ~ paste0("NAICS ", petition_employer_naics)
+    )
+  ) %>%
+  group_by(industry_label) %>%
+  summarise(
+    n = n(),
+    median_premium_pct = median(wage_premium_pct, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(n))
+
+print(premium_by_industry)
+
+p52 <- ggplot(premium_by_industry, aes(x = reorder(industry_label, median_premium_pct), y = median_premium_pct)) +
+  geom_col(aes(fill = median_premium_pct >= 0)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = ifp_colors$rich_black) +
+  coord_flip() +
+  scale_fill_manual(values = c("TRUE" = ifp_colors$green, "FALSE" = ifp_colors$red), guide = "none") +
+  scale_y_continuous(labels = label_percent(scale = 1),
+                     expand = expansion(mult = c(0.1, 0.1))) +
+  labs(
+    title = "Median Wage Premium by Top 10 Industries",
+    subtitle = "Median percentage above/below similarly-qualified Americans (negative = underpaid)",
+    x = NULL,
+    y = "Median Wage Premium (%)"
+  ) +
+  theme_ifp()
+
+# Top 10 occupations by petition count
+top_occupations_for_premium <- h1b_policy %>%
+  filter(eligible_status_quo, !is.na(SOC_TITLE)) %>%
+  dplyr::count(SOC_TITLE, sort = TRUE) %>%
+  head(10) %>%
+  pull(SOC_TITLE)
+
+# Calculate median wage premium by occupation
+premium_by_occupation <- h1b_policy %>%
+  filter(SOC_TITLE %in% top_occupations_for_premium) %>%
+  mutate(
+    occupation_label = case_when(
+      grepl("Software Developers", SOC_TITLE) ~ "Software Developers",
+      grepl("Computer Systems Analysts", SOC_TITLE) ~ "Computer Systems\nAnalysts",
+      grepl("Computer Systems Engineers", SOC_TITLE) ~ "Computer Systems\nEngineers/Architects",
+      grepl("Computer Programmers", SOC_TITLE) ~ "Computer Programmers",
+      grepl("Software Quality", SOC_TITLE) ~ "Software QA\nAnalysts/Testers",
+      grepl("Information Technology Project", SOC_TITLE) ~ "IT Project Managers",
+      grepl("Computer Occupations, All Other", SOC_TITLE) ~ "Computer\nOccupations (Other)",
+      grepl("Business Intelligence", SOC_TITLE) ~ "Business Intelligence\nAnalysts",
+      grepl("Mechanical Engineers", SOC_TITLE) ~ "Mechanical Engineers",
+      grepl("Operations Research", SOC_TITLE) ~ "Operations Research\nAnalysts",
+      TRUE ~ SOC_TITLE
+    )
+  ) %>%
+  group_by(occupation_label) %>%
+  summarise(
+    n = n(),
+    median_premium_pct = median(wage_premium_pct, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(n))
+
+print(premium_by_occupation)
+
+p53 <- ggplot(premium_by_occupation, aes(x = reorder(occupation_label, median_premium_pct), y = median_premium_pct)) +
+  geom_col(aes(fill = median_premium_pct >= 0)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = ifp_colors$rich_black) +
+  coord_flip() +
+  scale_fill_manual(values = c("TRUE" = ifp_colors$green, "FALSE" = ifp_colors$red), guide = "none") +
+  scale_y_continuous(labels = label_percent(scale = 1),
+                     expand = expansion(mult = c(0.1, 0.1))) +
+  labs(
+    title = "Median Wage Premium by Top 10 Occupations",
+    subtitle = "Median percentage above/below similarly-qualified Americans (negative = underpaid)",
+    x = NULL,
+    y = "Median Wage Premium (%)"
+  ) +
+  theme_ifp()
+
+################################################################################
 # Print all new pages to PDF
 ################################################################################
 
@@ -3556,11 +3668,17 @@ print(p50)
 # Page 56: Median wage premium by education and firm type
 print(p51)
 
+# Page 57: Median wage premium by top 10 industries
+print(p52)
+
+# Page 58: Median wage premium by top 10 occupations
+print(p53)
+
 dev.off()
 
 cat("\n=== Analysis Complete ===\n")
 cat("Output saved to: output/analysis/economic_analysis.pdf\n")
-cat("Total pages: 56\n")
+cat("Total pages: 58\n")
 cat("\nPage 1: Overall Summary\n")
 cat("Pages 2-3: Scatterplots (Salary vs Wage Premium)\n")
 cat("Pages 4-20: Eligible Population Analyses\n")
@@ -3571,16 +3689,18 @@ cat("Pages 21-28: Weighted Lottery Simulation Analyses\n")
 cat("Pages 29-34: Industry and Occupation Analyses\n")
 cat("Pages 35-40: Lifetime Earnings Analyses\n")
 cat("Pages 41-44: Underpayment by Industry/Occupation (Policy Comparisons)\n")
-cat("Pages 45-56: Firm Type and Education Level Analyses\n")
-cat("  Page 45: H-1B Dependent vs Other Firms Underpayment\n")
+cat("Pages 45-58: Firm Type and Education Level Analyses\n")
+cat("  Page 45: Underpayment Rate by Firm Type (3 bars)\n")
 cat("  Page 46: Petition Composition by Firm Type and Policy\n")
 cat("  Page 47: IT Outsourcer Share by Policy\n")
 cat("  Page 48: H-1B Dependent Share by Policy\n")
 cat("  Page 49: Underpaid Petition Composition by Firm Type\n")
-cat("  Page 50: Median Underpayment ($) by Firm Type\n")
-cat("  Page 51: Median Underpayment (%) by Firm Type\n")
+cat("  Page 50: Median Wage Premium ($) by Firm Type (All Petitions)\n")
+cat("  Page 51: Median Wage Premium (%) by Firm Type (All Petitions)\n")
 cat("  Page 52: Eligibility Rates by Firm Type and Policy\n")
-cat("  Page 53: Underpayment Rate by Education Level\n")
-cat("  Page 54: Median Wage Premium by Education Level\n")
-cat("  Page 55: Underpayment by Education and Firm Type\n")
-cat("  Page 56: Wage Premium by Education and Firm Type\n")
+cat("  Page 53: Underpayment Rate by Education Level (Bachelor's+)\n")
+cat("  Page 54: Median Wage Premium by Education Level (Bachelor's+)\n")
+cat("  Page 55: Underpayment by Education and Firm Type (Bachelor's+)\n")
+cat("  Page 56: Wage Premium by Education and Firm Type (Bachelor's+)\n")
+cat("  Page 57: Median Wage Premium by Top 10 Industries\n")
+cat("  Page 58: Median Wage Premium by Top 10 Occupations\n")
