@@ -3294,12 +3294,19 @@ p44 <- ggplot(data.frame(
 
 ################################################################################
 # ANALYSIS 5: Median Wage Premium by Firm Type (All Petitions)
+# H-1B Dependent vs All Other
 ################################################################################
 
 cat("\n--- Analysis 5: Median Wage Premium by Firm Type ---\n")
 
 median_premium_by_firm <- h1b_policy %>%
-  group_by(firm_type) %>%
+  mutate(
+    firm_category = case_when(
+      is_h1b_dependent == TRUE ~ "H-1B Dependent",
+      TRUE ~ "All Other"  # Includes FALSE and NA
+    )
+  ) %>%
+  group_by(firm_category) %>%
   summarise(
     n = n(),
     median_premium_dollars = median(petition_annual_pay_clean - pw_p50, na.rm = TRUE),
@@ -3309,7 +3316,7 @@ median_premium_by_firm <- h1b_policy %>%
 
 print(median_premium_by_firm)
 
-p45 <- ggplot(median_premium_by_firm, aes(x = firm_type, y = median_premium_dollars)) +
+p45 <- ggplot(median_premium_by_firm, aes(x = firm_category, y = median_premium_dollars)) +
   geom_col(aes(fill = median_premium_dollars >= 0)) +
   geom_hline(yintercept = 0, linetype = "dashed", color = ifp_colors$rich_black) +
   geom_text(aes(label = dollar(median_premium_dollars, accuracy = 1)),
@@ -3326,7 +3333,7 @@ p45 <- ggplot(median_premium_by_firm, aes(x = firm_type, y = median_premium_doll
   ) +
   theme_ifp()
 
-p46 <- ggplot(median_premium_by_firm, aes(x = firm_type, y = median_premium_pct)) +
+p46 <- ggplot(median_premium_by_firm, aes(x = firm_category, y = median_premium_pct)) +
   geom_col(aes(fill = median_premium_pct >= 0)) +
   geom_hline(yintercept = 0, linetype = "dashed", color = ifp_colors$rich_black) +
   geom_text(aes(label = sprintf("%.1f%%", median_premium_pct)),
