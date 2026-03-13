@@ -3293,13 +3293,12 @@ p44 <- ggplot(data.frame(
   theme_ifp()
 
 ################################################################################
-# ANALYSIS 4B: Share of Underpaid Petitions - H-1B Dependent vs All Other
+# ANALYSIS 4B: Underpayment Rate - H-1B Dependent vs All Other
 ################################################################################
 
-cat("\n--- Analysis 4B: Share Underpaid - H-1B Dependent vs All Other ---\n")
+cat("\n--- Analysis 4B: Underpayment Rate - H-1B Dependent vs All Other ---\n")
 
-underpaid_share_h1b_vs_other <- h1b_policy %>%
-  filter(underpaid) %>%
+underpayment_rate_h1b_vs_other <- h1b_policy %>%
   mutate(
     firm_category = case_when(
       is_h1b_dependent == TRUE ~ "H-1B Dependent",
@@ -3308,27 +3307,25 @@ underpaid_share_h1b_vs_other <- h1b_policy %>%
   ) %>%
   group_by(firm_category) %>%
   summarise(
-    n = n(),
+    n_total = n(),
+    n_underpaid = sum(underpaid, na.rm = TRUE),
+    pct_underpaid = 100 * n_underpaid / n_total,
     .groups = "drop"
-  ) %>%
-  mutate(
-    pct_share = 100 * n / sum(n)
   )
 
-cat(sprintf("Total underpaid petitions: %s\n", format(sum(underpaid_share_h1b_vs_other$n), big.mark = ",")))
-print(underpaid_share_h1b_vs_other)
+print(underpayment_rate_h1b_vs_other)
 
-p44b <- ggplot(underpaid_share_h1b_vs_other, aes(x = firm_category, y = pct_share)) +
-  geom_col(fill = ifp_colors$red) +
-  geom_text(aes(label = sprintf("%.1f%%", pct_share)),
+p44b <- ggplot(underpayment_rate_h1b_vs_other, aes(x = firm_category, y = pct_underpaid)) +
+  geom_col(fill = ifp_colors$dark_blue) +
+  geom_text(aes(label = sprintf("%.1f%%", pct_underpaid)),
             vjust = -0.5, size = 4, color = ifp_colors$rich_black) +
   scale_y_continuous(labels = label_percent(scale = 1),
                      expand = expansion(mult = c(0, 0.15))) +
   labs(
-    title = "Share of Underpaid Petitions: H-1B Dependent vs All Other",
-    subtitle = "Distribution of all underpaid petitions across firm types",
+    title = "Underpayment Rate: H-1B Dependent vs All Other Firms",
+    subtitle = "Percentage of workers paid less than similarly-qualified Americans",
     x = NULL,
-    y = "Share of Underpaid Petitions (%)"
+    y = "Underpaid (%)"
   ) +
   theme_ifp()
 
@@ -3745,7 +3742,7 @@ cat("  Page 46: Petition Composition by Firm Type and Policy\n")
 cat("  Page 47: IT Outsourcer Share by Policy\n")
 cat("  Page 48: H-1B Dependent Share by Policy\n")
 cat("  Page 49: Underpaid Petition Composition by Firm Type (3 bars)\n")
-cat("  Page 50: Share Underpaid - H-1B Dependent vs All Other (2 bars)\n")
+cat("  Page 50: Underpayment Rate - H-1B Dependent vs All Other (2 bars)\n")
 cat("  Page 51: Median Wage Premium ($) - H-1B Dependent vs All Other\n")
 cat("  Page 52: Median Wage Premium (%) - H-1B Dependent vs All Other\n")
 cat("  Page 53: Eligibility Rates by Firm Type and Policy\n")
