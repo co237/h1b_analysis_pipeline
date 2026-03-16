@@ -266,6 +266,8 @@ soc_18_to_10 <- soc_10_18_xwalk %>%
   select(SOC_2018_clean, SOC_2010_clean) %>%
   distinct()
 
+rm(soc_10_18_xwalk)  # free ~1 MB; soc_18_to_10 is the only downstream dependency
+
 unique_combos <- unique_combos %>%
   distinct(SOC_CODE_clean, ACS_OCCSOC, MSA_code, highest_ed, Years_pot_experience, PW_year)
 
