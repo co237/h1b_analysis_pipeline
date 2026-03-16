@@ -106,6 +106,22 @@ if (file.exists("config.R")) {
 min_obs_threshold <- 100
 
 # =============================================================================
+# USER TOGGLE: Parallel occupation loop
+# =============================================================================
+# When TRUE, the Mincer model loop uses furrr::future_map() to fit models
+# across multiple CPU cores simultaneously. Requires the 'furrr' package
+# (install.packages("furrr")).
+#
+# On a machine with 4+ cores this typically cuts wall-clock time for the
+# model-fitting section by 2-4x. Results are identical to the sequential
+# version because each occupation is independent.
+#
+# Set to FALSE (default) to use a standard sequential for loop with no
+# extra dependencies.
+# =============================================================================
+USE_PARALLEL_MINCER <- FALSE  # set TRUE to enable parallel execution
+
+# =============================================================================
 # SECTION 1: LOAD AND CLEAN ACS DATA
 # =============================================================================
 #
@@ -268,7 +284,7 @@ if (!requireNamespace("readxl", quietly = TRUE)) {
   stop("Package 'readxl' is required. Install with: install.packages('readxl')")
 }
 soc_10_18_xwalk <- readxl::read_xlsx(
-  file.path(data_raw, "Other Data/soc_2010_to_2018_crosswalk.xlsx"),
+  file.path(data_raw, "Other_Data/soc_2010_to_2018_crosswalk.xlsx"),
   skip = 8,
   sheet = "Sorted by 2010"
 ) %>%
@@ -494,58 +510,63 @@ calculate_edu_exp_ratios <- function(model, occ_data, raw_median) {
     summarise(area_weight = sum(PERWT), .groups = 'drop') %>%
     mutate(weight_prop = area_weight / sum(area_weight))
 
-  # For each (education, experience), predict across all areas and weight
-  # Use a vectorized approach instead of rowwise() to avoid scoping issues
-  edu_exp_grid$predicted_wage <- NA_real_
-  edu_exp_grid$ratio_p50 <- NA_real_
+  # Vectorized prediction: replicate area_weights for every (edu, exp) grid row,
+  # call predict() once on the full batch, then use tapply() to compute the
+  # weighted average per grid row.
+  #
+  # This is mathematically identical to the original per-row for-loop:
+  #   - pred_data_all rows (i-1)*n_areas+1 .. i*n_areas are exactly the same
+  #     as the pred_data created for iteration i of the old loop.
+  #   - feols predict() is row-independent (each row's prediction depends only
+  #     on its own covariate values), so batching does not change any result.
+  #   - tapply(..., sum) reproduces sum(pred_wage_levels * weight_prop) per group.
+  n_grid  <- nrow(edu_exp_grid)
+  n_areas <- nrow(area_weights)
 
-  # DIAGNOSTIC FLAG: Set to TRUE for first failed occupation to debug
-  print_diagnostic <- FALSE
+  pred_data_all <- area_weights[rep(seq_len(n_areas), times = n_grid), ]
+  rownames(pred_data_all) <- NULL
+  pred_data_all$highest_ed           <- rep(edu_exp_grid$highest_ed,           each = n_areas)
+  pred_data_all$Years_pot_experience <- rep(edu_exp_grid$Years_pot_experience, each = n_areas)
 
-  for (i in seq_len(nrow(edu_exp_grid))) {
-    # Create prediction data for all areas with this education and experience
-    pred_data <- area_weights %>%
-      mutate(
-        highest_ed = edu_exp_grid$highest_ed[i],
-        Years_pot_experience = edu_exp_grid$Years_pot_experience[i]
-      )
+  pred_log_wages   <- predict(model, newdata = pred_data_all)
+  pred_wage_levels <- exp(pred_log_wages)
+  weights_rep      <- rep(area_weights$weight_prop, times = n_grid)
+  group_ids        <- rep(seq_len(n_grid),           each  = n_areas)
 
-    # Predict log wages
-    pred_log_wage <- predict(model, newdata = pred_data)
+  weighted_avgs <- as.numeric(
+    tapply(pred_wage_levels * weights_rep, group_ids, sum, na.rm = TRUE)
+  )
 
-    # Convert to levels and take weighted average
-    pred_wage_levels <- exp(pred_log_wage)
-    weighted_avg <- sum(pred_wage_levels * pred_data$weight_prop, na.rm = TRUE)
-
-    # Store results
-    edu_exp_grid$predicted_wage[i] <- weighted_avg
-    edu_exp_grid$ratio_p50[i] <- weighted_avg / raw_median
-
-    # DIAGNOSTIC: Print info for first prediction when diagnostic mode enabled
-    if (print_diagnostic && i == 1) {
-      cat("\n--- DIAGNOSTIC INFO ---\n")
-      cat("Area weights rows:", nrow(area_weights), "\n")
-      cat("Pred data rows:", nrow(pred_data), "\n")
-      cat("Pred log wage length:", length(pred_log_wage), "\n")
-      cat("NA predictions:", sum(is.na(pred_log_wage)), "\n")
-      cat("Weighted avg:", weighted_avg, "\n")
-      cat("Raw median:", raw_median, "\n")
-      cat("Ratio:", weighted_avg / raw_median, "\n")
-      if (sum(is.na(pred_log_wage)) > 0) {
-        cat("First few areas:\n")
-        print(head(pred_data))
-        cat("First few predictions:\n")
-        print(head(pred_log_wage))
-      }
-      cat("----------------------\n\n")
-    }
-  }
+  edu_exp_grid$predicted_wage <- weighted_avgs
+  edu_exp_grid$ratio_p50      <- weighted_avgs / raw_median
 
   edu_exp_grid <- edu_exp_grid %>%
     select(highest_ed, Years_pot_experience, ratio_p50)
 
   return(edu_exp_grid)
 }
+
+# =============================================================================
+# Pre-split ACS data into named lists keyed by each SOC truncation level.
+#
+# The occupation loop below previously called filter() on the full ~1M-row
+# acs_data_19_23 for EVERY fallback level of EVERY occupation — up to 4 full
+# scans per iteration. split() does the same partitioning once up front;
+# each list[[key]] is byte-for-byte identical to filter(col == key) and is
+# retrieved in O(1) time instead of O(n).
+#
+# NULL is returned for keys not present in the data (e.g., rare SOC codes).
+# The loop uses %||% to substitute an empty data frame, matching the original
+# behaviour where filter() would have returned zero rows.
+# =============================================================================
+`%||%` <- function(x, y) if (is.null(x)) y else x
+
+acs_by_6digit <- split(acs_data_19_23, acs_data_19_23$OCCSOC)
+acs_by_5digit <- split(acs_data_19_23, acs_data_19_23$SOC5)
+acs_by_3digit <- split(acs_data_19_23, acs_data_19_23$SOC3)
+acs_by_2digit <- split(acs_data_19_23, acs_data_19_23$SOC2)
+
+cat("ACS data pre-split into lookup lists by SOC level.\n\n")
 
 # Identify all ACS occupation codes needed across ALL years and wage types.
 # We take the union so the Mincer loop covers every occupation that appears
@@ -579,12 +600,26 @@ cat("NEW METHODOLOGY: One national model per occupation\n")
 cat("(Models are year-invariant; year affects OES anchor only)\n")
 cat("=============================================================\n\n")
 
-for (i in seq_along(occs_needed)) {
-
+# =============================================================================
+# process_occupation(i): fit one Mincer model for occs_needed[i].
+#
+# Extracting the body into a named function serves two purposes:
+#   1. It enables optional parallel execution via furrr::future_map() when
+#      USE_PARALLEL_MINCER = TRUE (each worker calls the function independently).
+#   2. It makes the sequential path identical — lapply() calls process_occupation()
+#      in order, producing the same results as the original for loop.
+#
+# Returns a data frame of edu-exp ratios for the occupation, or NULL if
+# model fitting fails for all fallback levels.
+# =============================================================================
+process_occupation <- function(i) {
   occ <- occs_needed[i]
-  if (i %% 50 == 0) cat("Processing occupation", i, "of", length(occs_needed), "\n")
 
-  occ_data_6digit <- acs_data_19_23 %>% filter(OCCSOC == occ)
+  # List lookups replace filter() on the full ACS dataset. Each lookup is
+  # O(1) and returns the same rows that filter() would have returned.
+  # %||% substitutes an empty data frame when a key is absent from the list,
+  # matching the original behaviour (filter() returning zero rows).
+  occ_data_6digit <- acs_by_6digit[[occ]] %||% data.frame()
 
   # -----------------------------------------------------------------------
   # STEP A: Compute occupation-wide summary statistics.
@@ -595,12 +630,12 @@ for (i in seq_along(occs_needed)) {
   # Both are year-invariant — derived once from the 2019-2023 ACS.
   # -----------------------------------------------------------------------
 
+  soc5_val <- substr(occ, 1, 5)
   pct_data <- if (nrow(occ_data_6digit) >= 30) {
     occ_data_6digit
   } else {
-    soc5_val  <- substr(occ, 1, 5)
-    data_5dig <- acs_data_19_23 %>% filter(SOC5 == soc5_val)
-    if (nrow(data_5dig) >= 30) data_5dig else acs_data_19_23
+    data_5dig_pct <- acs_by_5digit[[soc5_val]] %||% data.frame()
+    if (nrow(data_5dig_pct) >= 30) data_5dig_pct else acs_data_19_23
   }
 
   raw_median <- as.numeric(wtd.quantile(pct_data$INCWAGE,
@@ -643,10 +678,11 @@ for (i in seq_along(occs_needed)) {
     }
   }
 
-  # Try broader SOC groups if 6-digit fails
+  # Try broader SOC groups if 6-digit fails.
+  # soc5_val is already set above; the list lookups are O(1) replacements for
+  # the original filter() calls on the full ACS dataset.
   if (is.null(edu_exp_ratios)) {
-    soc5_val  <- substr(occ, 1, 5)
-    data_5dig <- acs_data_19_23 %>% filter(SOC5 == soc5_val)
+    data_5dig <- acs_by_5digit[[soc5_val]] %||% data.frame()
     if (nrow(data_5dig) >= min_obs_threshold) {
       national_model <- fit_mincer_with_area_fe(data_5dig)
       if (!is.null(national_model)) {
@@ -659,7 +695,7 @@ for (i in seq_along(occs_needed)) {
   # Try 3-digit if still no success
   if (is.null(edu_exp_ratios)) {
     soc3_val  <- substr(occ, 1, 3)
-    data_3dig <- acs_data_19_23 %>% filter(SOC3 == soc3_val)
+    data_3dig <- acs_by_3digit[[soc3_val]] %||% data.frame()
     if (nrow(data_3dig) >= min_obs_threshold) {
       national_model <- fit_mincer_with_area_fe(data_3dig)
       if (!is.null(national_model)) {
@@ -672,7 +708,7 @@ for (i in seq_along(occs_needed)) {
   # Try 2-digit
   if (is.null(edu_exp_ratios)) {
     soc2_val  <- substr(occ, 1, 2)
-    data_2dig <- acs_data_19_23 %>% filter(SOC2 == soc2_val)
+    data_2dig <- acs_by_2digit[[soc2_val]] %||% data.frame()
     if (nrow(data_2dig) >= min_obs_threshold) {
       national_model <- fit_mincer_with_area_fe(data_2dig)
       if (!is.null(national_model)) {
@@ -692,15 +728,13 @@ for (i in seq_along(occs_needed)) {
   }
 
   # -----------------------------------------------------------------------
-  # STEP C: Store education-experience ratios
+  # STEP C: Return education-experience ratios for this occupation.
   #
-  # If we successfully fitted a model with area FE and calculated ratios,
-  # store them indexed by occupation. Each row has (education, experience, ratio_p50).
-  # The percentile ratios (p62, p75, p90) are stored at occupation level.
+  # Add occupation code and percentile ratios before returning. The caller
+  # (lapply or future_map) collects all results and bind_rows them together.
   # -----------------------------------------------------------------------
 
   if (!is.null(edu_exp_ratios)) {
-    # Add occupation code and percentile ratios
     edu_exp_ratios <- edu_exp_ratios %>%
       mutate(
         OCCSOC = occ,
@@ -709,17 +743,35 @@ for (i in seq_along(occs_needed)) {
         ratio_p90 = ratio_p50 * ratio_p90,
         model_level = model_level
       )
-
-    # Store in new structure
-    if (!exists("occ_edu_exp_ratios")) {
-      occ_edu_exp_ratios <- edu_exp_ratios
-    } else {
-      occ_edu_exp_ratios <- bind_rows(occ_edu_exp_ratios, edu_exp_ratios)
-    }
   }
 
-  rm(occ_data_6digit)
-  gc()
+  edu_exp_ratios  # return value: data frame or NULL
+}
+
+# Run the occupation loop — sequentially or in parallel depending on the toggle.
+if (USE_PARALLEL_MINCER) {
+  library(furrr)
+  plan(multisession)
+  cat("Parallel mode enabled:", parallelly::availableCores(), "cores available\n\n")
+  results_list <- furrr::future_map(
+    seq_along(occs_needed),
+    process_occupation,
+    .options = furrr_options(seed = NULL)
+  )
+} else {
+  results_list <- vector("list", length(occs_needed))
+  for (i in seq_along(occs_needed)) {
+    if (i %% 50 == 0) cat("Processing occupation", i, "of", length(occs_needed), "\n")
+    results_list[[i]] <- process_occupation(i)
+  }
+}
+
+# Collect results: filter out NULLs then stack into one data frame.
+occ_edu_exp_ratios_list <- Filter(Negate(is.null), results_list)
+occ_edu_exp_ratios <- if (length(occ_edu_exp_ratios_list) > 0) {
+  bind_rows(occ_edu_exp_ratios_list)
+} else {
+  NULL
 }
 
 cat("\n=============================================================\n")
@@ -737,16 +789,30 @@ if (!is.null(occ_edu_exp_ratios)) {
   saveRDS(occ_edu_exp_ratios, output_file_rds)
   cat("Saved education-experience ratios to:", output_file_rds, "\n")
 
-  # Also save as CSV for backwards compatibility and easy viewing
-  output_file_csv <- file.path(data_processed, "mincer_edu_exp_ratios.csv")
-  write.csv(occ_edu_exp_ratios, output_file_csv, row.names = FALSE)
-  cat("Also saved as CSV to:", output_file_csv, "\n")
+  if (EXPORT_CSV_FOR_API) {
+    output_file_csv <- file.path(data_processed, "mincer_edu_exp_ratios.csv")
+    write.csv(occ_edu_exp_ratios, output_file_csv, row.names = FALSE)
+    cat("Also saved as CSV to:", output_file_csv, "\n")
+  }
 }
 cat("=============================================================\n\n")
 
 # =============================================================================
 # Save additional data files for interactive wage lookup
 # =============================================================================
+
+# =============================================================================
+# TOGGLE: CSV export for API / web app consumption
+# =============================================================================
+# Set EXPORT_CSV_FOR_API <- TRUE to write CSV copies of the processed output
+# files alongside the .rds files. These CSVs are required by the Python-based
+# prevailing wage API (pwd_microsite). The .rds files are always written and
+# are unaffected by this setting.
+#
+# Set to FALSE if you only need the R pipeline outputs and do not need to
+# serve data via the web API.
+# =============================================================================
+EXPORT_CSV_FOR_API <- TRUE
 
 cat("Saving OFLC wage data for interactive lookup...\n")
 
@@ -766,13 +832,25 @@ saveRDS(oflc_flat, oflc_bases_file)
 cat("Saved OFLC bases to:", oflc_bases_file, "\n")
 cat("  Flattened to", nrow(oflc_flat), "rows for fast lookup\n")
 
+if (EXPORT_CSV_FOR_API) {
+  write.csv(oflc_flat, file.path(data_processed, "oflc_bases.csv"), row.names = FALSE)
+  cat("Also saved as CSV to:", file.path(data_processed, "oflc_bases.csv"), "\n")
+}
+
 cat("Saving crosswalks for interactive lookup...\n")
 crosswalk_file <- file.path(data_processed, "crosswalks.rds")
 saveRDS(list(
   crosswalk_2018 = acs_oflc_crosswalk,
   fy2021_crosswalk = acs_oflc_crosswalk_2010
 ), crosswalk_file)
-cat("Saved crosswalks to:", crosswalk_file, "\n\n")
+cat("Saved crosswalks to:", crosswalk_file, "\n")
+
+if (EXPORT_CSV_FOR_API) {
+  write.csv(acs_oflc_crosswalk, file.path(data_processed, "crosswalk_2018.csv"), row.names = FALSE)
+  write.csv(acs_oflc_crosswalk_2010, file.path(data_processed, "fy2021_crosswalk.csv"), row.names = FALSE)
+  cat("Also saved crosswalks as CSVs to:", data_processed, "\n")
+}
+cat("\n")
 
 # Free ACS data — all information needed is now in ratios
 rm(acs_data_19_23)

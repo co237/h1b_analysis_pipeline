@@ -103,7 +103,7 @@ cat("===========================================================================
 
 # Read the FY2021 OFLC file and extract unique SOC codes
 cat("Reading FY2021 OFLC wage file...\n")
-oflc_2021_file <- file.path(data_raw, "OFLC_Wages_2024-25", "ALC_Export_FY2021.csv")
+oflc_2021_file <- file.path(data_raw, "OFLC_Wages", "ALC_Export_FY2021.csv")
 
 if (!file.exists(oflc_2021_file)) {
   stop("FY2021 OFLC file not found: ", oflc_2021_file)
@@ -149,11 +149,11 @@ cat("\n")
 
 # Read ACS occupation codes
 cat("Reading ACS occupation codes...\n")
-acs_file <- file.path(data_raw, "Other Data", "acs_occupations.csv")
+acs_file <- file.path(data_raw, "Other_Data", "acs_occupations.csv")
 
 if (!file.exists(acs_file)) {
   stop("ACS file not found: ", acs_file, "\n",
-       "Please ensure acs_occupations.csv is in data/raw/Other Data/")
+       "Please ensure acs_occupations.csv is in data/raw/Other_Data/")
 }
 
 acs_data <- read_csv(acs_file, show_col_types = FALSE)

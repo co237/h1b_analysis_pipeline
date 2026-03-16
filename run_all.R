@@ -63,9 +63,6 @@ tryCatch({
   stop("Pipeline halted at Step 1")
 })
 
-# Memory cleanup between steps
-gc(verbose = FALSE)
-
 # ==============================================================================
 # STEP 2: Geocode to PUMAs
 # ==============================================================================
@@ -96,8 +93,6 @@ tryCatch({
   stop("Pipeline halted at Step 2")
 })
 
-gc(verbose = FALSE)
-
 # ==============================================================================
 # STEP 3: Interpolate Wage Percentiles
 # ==============================================================================
@@ -127,8 +122,6 @@ tryCatch({
   cat("  ", conditionMessage(e), "\n\n")
   stop("Pipeline halted at Step 3")
 })
-
-gc(verbose = FALSE)
 
 # ==============================================================================
 # STEPS 4-5: Calculate Mincer Wages and Apply to Petitions
@@ -193,8 +186,6 @@ tryCatch({
   stop("Pipeline halted at Step 5")
 })
 
-gc(verbose = FALSE)
-
 # ==============================================================================
 # STEP 6: NPRM Simulation
 # ==============================================================================
@@ -222,8 +213,6 @@ tryCatch({
   cat("  ", conditionMessage(e), "\n\n")
   stop("Pipeline halted at Step 6")
 })
-
-gc(verbose = FALSE)
 
 # ==============================================================================
 # STEP 7: Economic Analysis

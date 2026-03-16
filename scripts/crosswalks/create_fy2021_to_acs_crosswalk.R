@@ -84,7 +84,7 @@ cat(sprintf("  - 2018 ACS codes: %d\n\n", nrow(acs_2018)))
 # ============================================================================
 
 cat("STEP 2: Reading FY2021 OFLC codes...\n")
-fy2021_file <- file.path(data_raw, "OFLC_Wages_2024-25", "ALC_Export_FY2021.csv")
+fy2021_file <- file.path(data_raw, "OFLC_Wages", "ALC_Export_FY2021.csv")
 
 if (!file.exists(fy2021_file)) {
   stop("FY2021 OFLC file not found: ", fy2021_file)

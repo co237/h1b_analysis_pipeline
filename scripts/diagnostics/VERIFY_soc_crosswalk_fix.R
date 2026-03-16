@@ -35,7 +35,7 @@ cat("===========================================================================
 cat("Step 1: Loading SOC 2010→2018 crosswalk...\n\n")
 
 soc_2010_to_2018 <- read_xlsx(
-  file.path(data_raw, "Other Data", "soc_2010_to_2018_crosswalk.xlsx"),
+  file.path(data_raw, "Other_Data", "soc_2010_to_2018_crosswalk.xlsx"),
   skip = 8,
   sheet = "Sorted by 2010"
 ) %>%
