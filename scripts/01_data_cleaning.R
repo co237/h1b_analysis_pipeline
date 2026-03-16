@@ -68,46 +68,33 @@ dot_matching_path = file.path(data_intermediate, "dot_matching")
 # pulling data back to 2015 for conservative purposes -- sometimes takes years between LCA and I-129 submission.
 # file formats are quarterly 2020-2024, and annual 2015-2019
 # note for user: this process may take time. skip 122-309, and uncomment 311
-setwd(lca_path)
-quarters = list()
-
-for (i in (1:4)) {
-  for (year in (2020:2024)) {
-    print(i)
-    print(year)
-    
-    file_name = paste0("LCA_Disclosure_Data_FY", year, "_Q",i,".xlsx")
-    
-    # load and clean
-    file = read_xlsx(file_name) %>%
-      filter(VISA_CLASS == "H-1B") %>%      # H-1Bs only
-      select(CASE_NUMBER,
-             CASE_STATUS,
-             VISA_CLASS,
-             DECISION_DATE,
-             PW_WAGE_LEVEL,
-             SOC_CODE,
-             SOC_TITLE,
-             WORKSITE_COUNTY,
-             WORKSITE_STATE,
-             WAGE_RATE_OF_PAY_FROM, 
-             WAGE_RATE_OF_PAY_TO, 
-             PREVAILING_WAGE,
-             WAGE_UNIT_OF_PAY) %>%
-      
-      # clean up monetary variables
-      mutate(across(c(WAGE_RATE_OF_PAY_FROM, WAGE_RATE_OF_PAY_TO, PREVAILING_WAGE),
-                    ~(as.numeric(str_replace_all(., c("\\$"="", ","=""))))
-      )) %>% mutate(FISCAL_YEAR = year)
-    
-    id = paste0(year,i)
-    print(id)
-    quarters [[id]] = file
-  }
+# Read one quarterly LCA file and return a cleaned dataframe.
+# Uses absolute paths (file.path(lca_path, ...)) so setwd() is not required,
+# which also makes it safe to swap Map() for furrr::future_map2() in the
+# future if parallel loading is desired (output is identical after distinct()).
+read_lca_quarterly <- function(year, quarter) {
+  fp <- file.path(lca_path, paste0("LCA_Disclosure_Data_FY", year, "_Q", quarter, ".xlsx"))
+  read_xlsx(fp) %>%
+    filter(VISA_CLASS == "H-1B") %>%
+    select(CASE_NUMBER, CASE_STATUS, VISA_CLASS, DECISION_DATE,
+           PW_WAGE_LEVEL, SOC_CODE, SOC_TITLE,
+           WORKSITE_COUNTY, WORKSITE_STATE,
+           WAGE_RATE_OF_PAY_FROM, WAGE_RATE_OF_PAY_TO,
+           PREVAILING_WAGE, WAGE_UNIT_OF_PAY) %>%
+    mutate(
+      across(c(WAGE_RATE_OF_PAY_FROM, WAGE_RATE_OF_PAY_TO, PREVAILING_WAGE),
+             ~as.numeric(str_replace_all(., c("\\$" = "", "," = "")))),
+      FISCAL_YEAR = year
+    )
 }
 
-lca_2020_2024 = bind_rows(quarters)
-lca_2020_2024 = lca_2020_2024 %>% distinct() # remove duplicates
+# Load all 20 quarterly files. expand.grid with year as the first (fastest-
+# varying) argument reproduces the outer-quarter / inner-year iteration order
+# of the original nested for-loop, so bind_rows() produces the same row
+# sequence and distinct() removes the same duplicates.
+lca_pairs     <- expand.grid(year = 2020:2024, quarter = 1:4, stringsAsFactors = FALSE)
+quarters      <- Map(read_lca_quarterly, lca_pairs$year, lca_pairs$quarter)
+lca_2020_2024 <- bind_rows(quarters) %>% distinct()
 
 # save progress in the event of crashes
 save(lca_2020_2024, file = file.path(cleaned_path, "lca_2020_2024.RData"))
@@ -119,7 +106,7 @@ years = c()
 for (year in c(2015:2019)) {
   print(year)
   
-  file_name = paste0("H-1B_Disclosure_Data_FY", year,".xlsx")
+  file_name = file.path(lca_path, paste0("H-1B_Disclosure_Data_FY", year, ".xlsx"))
   
   # load and clean
   if(year==2019) {
@@ -279,8 +266,8 @@ lca_2015_2024 = lca_2015_2024 %>% select(
 
 # save cleaned lca file.
 save(lca_2015_2024, file = file.path(cleaned_path, "lca_2015_2024.RData"))
-
-load(file.path(cleaned_path, "lca_2015_2024.RData"))
+# Removed redundant load() that immediately followed the save() — lca_2015_2024
+# is already in memory; reloading it from disk was a no-op.
 
 ################################################################################
 # STEP 2: Pull in 2021-2024 H1-B FOIA data and clean names
