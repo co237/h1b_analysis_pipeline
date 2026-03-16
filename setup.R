@@ -47,6 +47,8 @@ required_packages <- c(
   "tidygeocoder", "sf", "tidycensus",
   # String matching
   "fuzzyjoin",
+  # Graph / network (used in data cleaning)
+  "igraph",
   # Visualization and formatting
   "ggplot2", "scales", "gridExtra", "knitr",
   # Statistics and modeling
@@ -87,10 +89,10 @@ cat("Project root:", project_root, "\n\n")
 directories <- c(
   file.path(project_root, "data"),
   file.path(project_root, "data", "raw"),
-  file.path(project_root, "data", "raw", "FOIA Data"),
+  file.path(project_root, "data", "raw", "FOIA_Data"),
   file.path(project_root, "data", "raw", "LCA_Data"),
-  file.path(project_root, "data", "raw", "OFLC_Wages_2024-25"),
-  file.path(project_root, "data", "raw", "Other Data"),
+  file.path(project_root, "data", "raw", "OFLC_Wages"),
+  file.path(project_root, "data", "raw", "Other_Data"),
   file.path(project_root, "data", "raw", "census_crosswalks"),
   file.path(project_root, "data", "intermediate"),
   file.path(project_root, "data", "intermediate", "dot_matching"),
@@ -116,17 +118,17 @@ cat("\n✓ Directory structure created\n\n")
 cat("--- Step 4: Checking for Required Data Files ---\n\n")
 
 data_raw <- file.path(project_root, "data", "raw")
-other_data_path <- file.path(data_raw, "Other Data")
+other_data_path <- file.path(data_raw, "Other_Data")
 
 # Define required files with their categories
 required_files <- list(
   "H-1B FOIA Data" = list(
     files = c(
-      file.path(data_raw, "FOIA Data", "TRK_13139_FY2021.csv"),
-      file.path(data_raw, "FOIA Data", "TRK_13139_FY2022.csv"),
-      file.path(data_raw, "FOIA Data", "TRK_13139_FY2023.csv"),
-      file.path(data_raw, "FOIA Data", "TRK_13139_FY2024_single_reg.csv"),
-      file.path(data_raw, "FOIA Data", "TRK_13139_FY2024_multi_reg.csv")
+      file.path(data_raw, "FOIA_Data","TRK_13139_FY2021.csv"),
+      file.path(data_raw, "FOIA_Data","TRK_13139_FY2022.csv"),
+      file.path(data_raw, "FOIA_Data","TRK_13139_FY2023.csv"),
+      file.path(data_raw, "FOIA_Data","TRK_13139_FY2024_single_reg.csv"),
+      file.path(data_raw, "FOIA_Data","TRK_13139_FY2024_multi_reg.csv")
     ),
     required = TRUE
   ),
@@ -163,7 +165,7 @@ required_files <- list(
     required = TRUE
   ),
   "OFLC Wage Data" = list(
-    files = file.path(data_raw, "OFLC_Wages_2024-25"),
+    files = file.path(data_raw, "OFLC_Wages"),
     check_dir = TRUE,
     required = FALSE
   )

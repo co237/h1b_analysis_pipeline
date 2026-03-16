@@ -249,7 +249,7 @@ if (!exists("soc_10_18_xwalk")) {
     stop("Package 'readxl' is required. Install with: install.packages('readxl')")
   }
   soc_10_18_xwalk <- readxl::read_xlsx(
-    file.path(data_raw, "Other Data/soc_2010_to_2018_crosswalk.xlsx"),
+    file.path(data_raw, "Other_Data/soc_2010_to_2018_crosswalk.xlsx"),
     skip = 8,
     sheet = "Sorted by 2010"
   ) %>%

@@ -38,7 +38,7 @@ if (file.exists("config.R")) {
   source("../config.R")
 } else {
   stop("Cannot find config.R. Please make sure your working directory is set to the project root:\n",
-       "  setwd('path/to/h1b_analysis_pipeline')")
+       "  setwd('/Users/violet/Desktop/repos/h1b_analysis_pipeline')")
 }
 
 # load libraries
@@ -699,7 +699,7 @@ fys <- fys %>%
 
 ################################################################################
 # Match zip codes to counties first
-zip_cty_crosswalk <- read_xlsx(file.path(data_path, "Other Data/ZIP_COUNTY_122024.xlsx"))
+zip_cty_crosswalk <- read_xlsx(file.path(data_path, "Other_Data/ZIP_COUNTY_122024.xlsx"))
 zip_cty_crosswalk <- zip_cty_crosswalk %>%
   group_by(ZIP, USPS_ZIP_PREF_STATE) %>%
   slice(which.max(TOT_RATIO)) %>% ungroup() %>%
@@ -801,7 +801,7 @@ fys <- fys %>% filter(valid_zip_geocode == TRUE | !is.na(WORKSITE_COUNTY))
 
 ################################################################################
 # Crosswalk counties to MSAs
-cty_msa_crosswalk <- read_xlsx(file.path(data_path, "Other Data/area_definitions_m2023.xlsx"))
+cty_msa_crosswalk <- read_xlsx(file.path(data_path, "Other_Data/area_definitions_m2023.xlsx"))
 cty_msa_crosswalk <- cty_msa_crosswalk %>%
   mutate(county_fips = paste0(`FIPS code`, `County code`),
          township_code = paste0(`FIPS code`, `Township code`)) %>%
@@ -852,7 +852,7 @@ fys_NE <- fys %>%
 # Handle NE towns and cities without direct matches
 fys_no_cty_msa_match <- fys_NE %>% filter(is.na(MSA_code))
 
-zip_cbsa_crosswalk <- read_xlsx(file.path(data_path, "Other Data/ZIP_CBSA_122024.xlsx"))
+zip_cbsa_crosswalk <- read_xlsx(file.path(data_path, "Other_Data/ZIP_CBSA_122024.xlsx"))
 zip_cbsa_crosswalk <- zip_cbsa_crosswalk %>%
   group_by(ZIP, USPS_ZIP_PREF_STATE) %>%
   slice(which.max(TOT_RATIO)) %>% ungroup() %>%
@@ -969,7 +969,7 @@ normalize_title <- function(x) {
 }
 
 # Crosswalk 2010 SOC codes to 2018
-soc_10_18_xwalk <- read_xlsx(file.path(data_path, "Other Data/soc_2010_to_2018_crosswalk.xlsx"),
+soc_10_18_xwalk <- read_xlsx(file.path(data_path, "Other_Data/soc_2010_to_2018_crosswalk.xlsx"),
                              skip = 8, sheet = "Sorted by 2010")
 soc_10_18_xwalk <- soc_10_18_xwalk %>%
   filter(`2010 SOC Code` %in% (soc_10_18_xwalk %>%
@@ -995,7 +995,7 @@ soc_10_18_xwalk <- soc_10_18_xwalk %>%
 soc_10_18_xwalk_single <- soc_10_18_xwalk %>% filter(n_match_10 == 1) %>% select(-c(n_match_10))
 soc_10_18_xwalk_multi <- soc_10_18_xwalk %>% filter(n_match_10 != 1) %>% select(-c(n_match_10))
 
-oflc_xwalk <- read.csv(file = file.path(data_path, "Other Data", "OFLC_Wages_2024-25", "xwalk_plus.csv"))
+oflc_xwalk <- read.csv(file = file.path(data_path, "Other_Data", "OFLC_Wages_2024-25", "xwalk_plus.csv"))
 oflc_xwalk <- oflc_xwalk %>%
   select(TruncOnetCode, ONetTitle) %>%
   mutate(ONetTitle = normalize_title(ONetTitle)) %>%
@@ -1105,7 +1105,7 @@ nrow(fys_na_dot_job %>% filter(is.na(SOC_CODE))) # only 35 entries have no LCA f
 fys <- fys %>% filter(!applicant_id %in% (fys_na_dot_job %>% filter(is.na(SOC_CODE)) %>% .$applicant_id))
 
 # Clean DOT to SOC crosswalk
-dot_soc_crosswalk <- read_xlsx(path = file.path(data_path, "Other Data/DOT_to_ONET_SOC.xlsx"), skip = 3)
+dot_soc_crosswalk <- read_xlsx(path = file.path(data_path, "Other_Data/DOT_to_ONET_SOC.xlsx"), skip = 3)
 dot_soc_crosswalk <- dot_soc_crosswalk %>%
   mutate(DOT_category = substr(`DOT Code`, 1, 3),
          dot_title_norm = normalize_title(`DOT Title`),
@@ -1201,7 +1201,7 @@ fys <- fys %>% left_join(fys_misform_SOC, by = "applicant_id") %>%
 # STEP 5: Merge in OFLC metro-occupation Wage Levels
 ################################################################################
 setwd(data_path)
-wage_levels_FY24 <- read.csv("Other Data/OFLC_Wages_2024-25/ALC_Export_FY2023.csv") %>%
+wage_levels_FY24 <- read.csv("Other_Data/OFLC_Wages_2024-25/ALC_Export_FY2023.csv") %>%
   mutate(
     Level1_full = ifelse(Level1>1000,  Level1 , Level1* 2080),
     Level2_full = ifelse(Level2>1000,  Level2 , Level2* 2080),
@@ -1216,7 +1216,7 @@ wage_levels_FY24 <- read.csv("Other Data/OFLC_Wages_2024-25/ALC_Export_FY2023.cs
     Average_part = ifelse(Average>1000,  Level1 , Average* 1040),
     Year = 2024
   )
-wage_levels_FY23<- read.csv("Other Data/OFLC_Wages_2024-25/ALC_Export_FY2022.csv") %>%
+wage_levels_FY23<- read.csv("Other_Data/OFLC_Wages_2024-25/ALC_Export_FY2022.csv") %>%
   mutate(
     Level1_full = ifelse(Level1>1000,  Level1 , Level1* 2080),
     Level2_full = ifelse(Level2>1000,  Level2 , Level2* 2080),
@@ -1231,7 +1231,7 @@ wage_levels_FY23<- read.csv("Other Data/OFLC_Wages_2024-25/ALC_Export_FY2022.csv
     Average_part = ifelse(Average>1000,  Level1 , Average* 1040),
     Year = 2023
   )
-wage_levels_FY22<- read.csv("Other Data/OFLC_Wages_2024-25/ALC_Export_FY2021.csv") %>%
+wage_levels_FY22<- read.csv("Other_Data/OFLC_Wages_2024-25/ALC_Export_FY2021.csv") %>%
   mutate(
     Level1_full = ifelse(Level1>1000,  Level1 , Level1* 2080),
     Level2_full = ifelse(Level2>1000,  Level2 , Level2* 2080),
@@ -1247,7 +1247,7 @@ wage_levels_FY22<- read.csv("Other Data/OFLC_Wages_2024-25/ALC_Export_FY2021.csv
     Year = 2022
   )
 
-wage_levels_FY21<- read.csv("Other Data/OFLC_Wages_2024-25/ALC_Export_FY2020.csv") %>%
+wage_levels_FY21<- read.csv("Other_Data/OFLC_Wages_2024-25/ALC_Export_FY2020.csv") %>%
   mutate(
     Level1_full = ifelse(Level1>1000,  Level1 , Level1* 2080),
     Level2_full = ifelse(Level2>1000,  Level2 , Level2* 2080),

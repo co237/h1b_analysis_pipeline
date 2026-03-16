@@ -8,8 +8,8 @@
 # to create the final occupation_oflc_to_acs_crosswalk.csv
 #
 # Inputs:
-#   - data/raw/Other Data/oflc_occupations.csv
-#   - data/raw/Other Data/acs_occupations.csv
+#   - data/raw/Other_Data/oflc_occupations.csv
+#   - data/raw/Other_Data/acs_occupations.csv
 #
 # Output:
 #   - data/raw/oflc_acs_matched.csv
@@ -103,17 +103,17 @@ cat("===========================================================================
 
 # Read the data files
 cat("Reading data files...\n")
-oflc_file <- file.path(data_raw, "Other Data", "oflc_occupations.csv")
-acs_file <- file.path(data_raw, "Other Data", "acs_occupations.csv")
+oflc_file <- file.path(data_raw, "Other_Data","oflc_occupations.csv")
+acs_file <- file.path(data_raw, "Other_Data","acs_occupations.csv")
 
 # Check if files exist
 if (!file.exists(oflc_file)) {
   stop("OFLC file not found: ", oflc_file, "\n",
-       "Please ensure oflc_occupations.csv is in data/raw/Other Data/")
+       "Please ensure oflc_occupations.csv is in data/raw/Other_Data/")
 }
 if (!file.exists(acs_file)) {
   stop("ACS file not found: ", acs_file, "\n",
-       "Please ensure acs_occupations.csv is in data/raw/Other Data/")
+       "Please ensure acs_occupations.csv is in data/raw/Other_Data/")
 }
 
 oflc_data <- read_csv(oflc_file, show_col_types = FALSE)

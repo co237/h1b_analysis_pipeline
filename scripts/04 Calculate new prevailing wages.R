@@ -268,7 +268,7 @@ if (!requireNamespace("readxl", quietly = TRUE)) {
   stop("Package 'readxl' is required. Install with: install.packages('readxl')")
 }
 soc_10_18_xwalk <- readxl::read_xlsx(
-  file.path(data_raw, "Other Data/soc_2010_to_2018_crosswalk.xlsx"),
+  file.path(data_raw, "Other_Data/soc_2010_to_2018_crosswalk.xlsx"),
   skip = 8,
   sheet = "Sorted by 2010"
 ) %>%
@@ -737,16 +737,30 @@ if (!is.null(occ_edu_exp_ratios)) {
   saveRDS(occ_edu_exp_ratios, output_file_rds)
   cat("Saved education-experience ratios to:", output_file_rds, "\n")
 
-  # Also save as CSV for backwards compatibility and easy viewing
-  output_file_csv <- file.path(data_processed, "mincer_edu_exp_ratios.csv")
-  write.csv(occ_edu_exp_ratios, output_file_csv, row.names = FALSE)
-  cat("Also saved as CSV to:", output_file_csv, "\n")
+  if (EXPORT_CSV_FOR_API) {
+    output_file_csv <- file.path(data_processed, "mincer_edu_exp_ratios.csv")
+    write.csv(occ_edu_exp_ratios, output_file_csv, row.names = FALSE)
+    cat("Also saved as CSV to:", output_file_csv, "\n")
+  }
 }
 cat("=============================================================\n\n")
 
 # =============================================================================
 # Save additional data files for interactive wage lookup
 # =============================================================================
+
+# =============================================================================
+# TOGGLE: CSV export for API / web app consumption
+# =============================================================================
+# Set EXPORT_CSV_FOR_API <- TRUE to write CSV copies of the processed output
+# files alongside the .rds files. These CSVs are required by the Python-based
+# prevailing wage API (pwd_microsite). The .rds files are always written and
+# are unaffected by this setting.
+#
+# Set to FALSE if you only need the R pipeline outputs and do not need to
+# serve data via the web API.
+# =============================================================================
+EXPORT_CSV_FOR_API <- TRUE
 
 cat("Saving OFLC wage data for interactive lookup...\n")
 
@@ -766,13 +780,25 @@ saveRDS(oflc_flat, oflc_bases_file)
 cat("Saved OFLC bases to:", oflc_bases_file, "\n")
 cat("  Flattened to", nrow(oflc_flat), "rows for fast lookup\n")
 
+if (EXPORT_CSV_FOR_API) {
+  write.csv(oflc_flat, file.path(data_processed, "oflc_bases.csv"), row.names = FALSE)
+  cat("Also saved as CSV to:", file.path(data_processed, "oflc_bases.csv"), "\n")
+}
+
 cat("Saving crosswalks for interactive lookup...\n")
 crosswalk_file <- file.path(data_processed, "crosswalks.rds")
 saveRDS(list(
   crosswalk_2018 = acs_oflc_crosswalk,
   fy2021_crosswalk = acs_oflc_crosswalk_2010
 ), crosswalk_file)
-cat("Saved crosswalks to:", crosswalk_file, "\n\n")
+cat("Saved crosswalks to:", crosswalk_file, "\n")
+
+if (EXPORT_CSV_FOR_API) {
+  write.csv(acs_oflc_crosswalk, file.path(data_processed, "crosswalk_2018.csv"), row.names = FALSE)
+  write.csv(acs_oflc_crosswalk_2010, file.path(data_processed, "fy2021_crosswalk.csv"), row.names = FALSE)
+  cat("Also saved crosswalks as CSVs to:", data_processed, "\n")
+}
+cat("\n")
 
 # Free ACS data — all information needed is now in ratios
 rm(acs_data_19_23)

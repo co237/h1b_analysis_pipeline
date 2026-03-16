@@ -65,7 +65,7 @@ scripts_dir <- file.path(project_root, "scripts")
 
 # --- Input Data Files ---
 # FOIA H-1B petition data (FY 2021-2024)
-foia_data_path <- file.path(data_raw, "FOIA Data")
+foia_data_path <- file.path(data_raw, "FOIA_Data")
 foia_files <- c(
   "TRK_13139_FY2021.csv",
   "TRK_13139_FY2022.csv",
@@ -92,10 +92,10 @@ soc_definitions_file <- file.path(data_raw, "soc_2018_definitions.xlsx")
 census_crosswalks_dir <- file.path(data_raw, "census_crosswalks")
 
 # OFLC wage level data
-oflc_data_path <- file.path(data_raw, "OFLC_Wages_2024-25")
+oflc_data_path <- file.path(data_raw, "OFLC_Wages")
 
 # Other data directory (contains crosswalks and reference files)
-other_data_path <- file.path(data_raw, "Other Data")
+other_data_path <- file.path(data_raw, "Other_Data")
 
 # HUD ZIP to County crosswalk
 hud_zip_county_file <- file.path(other_data_path, "ZIP_COUNTY_122024.xlsx")
