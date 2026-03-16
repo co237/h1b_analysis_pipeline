@@ -40,81 +40,62 @@ h1b_22_24 <- read.csv(file.path(data_processed, "h1b_fy21_24_with_pumas.csv")) %
 ########################################################################################
 # STEP 2: Linearly interpolate percentiles between 17 and 67 using OFLC Wage Levels
 ########################################################################################
+
+# Helper functions for the interpolation. Extracted from the original rowwise()
+# mutate() block so they can be called via mapply(), which iterates at C level
+# rather than R level and is substantially faster across 273k+ rows.
+# Logic is identical to the original — same inputs, same conditional branches,
+# same outputs. Verified line-by-line against the rowwise version.
+.calc_petition_percentile <- function(L1, L2, L3, L4, wage) {
+  lvls <- c(L1, L2, L3, L4)
+  pcts <- c(17, 34, 50, 67)
+  keep <- !is.na(lvls)
+  lvls <- lvls[keep]
+  pcts <- pcts[keep]
+  if (length(lvls) == 0 || is.na(wage)) {
+    NA_real_
+  } else if (wage < min(lvls)) {
+    NA_real_
+  } else if (wage >= max(lvls)) {
+    100
+  } else {
+    lower_idx <- max(which(lvls <= wage))
+    upper_idx <- min(which(lvls > wage))
+    lo_lvl <- lvls[lower_idx]; hi_lvl <- lvls[upper_idx]
+    lo_pct <- pcts[lower_idx]; hi_pct <- pcts[upper_idx]
+    interp <- lo_pct + (wage - lo_lvl) / (hi_lvl - lo_lvl) * (hi_pct - lo_pct)
+    floor(interp)
+  }
+}
+
+.calc_petition_wage_status <- function(L1, L2, L3, L4, wage) {
+  lvls       <- c(L1, L2, L3, L4)
+  lvls_clean <- lvls[!is.na(lvls)]
+  if (is.na(wage)) {
+    NA_character_
+  } else if (length(lvls_clean) == 0) {
+    "Missing lower bound"
+  } else if (wage >= max(lvls_clean)) {
+    "Above Level 4"
+  } else if (wage < min(lvls_clean)) {
+    if (is.na(L1) && wage < min(lvls_clean)) "Missing lower bound" else "Too Low"
+  } else {
+    NA_character_
+  }
+}
+
 h1b_22_24 <- h1b_22_24 %>%
   mutate(
-    # Determine full-time vs part-time
     is_fulltime = petition_beneficiary_full_time != "N" | is.na(petition_beneficiary_full_time),
-    
-    # Select the correct wage level thresholds for each petition
-    L1 = if_else(is_fulltime, Level1_full, Level1_part),
-    L2 = if_else(is_fulltime, Level2_full, Level2_part),
-    L3 = if_else(is_fulltime, Level3_full, Level3_part),
-    L4 = if_else(is_fulltime, Level4_full, Level4_part),
-    
-    # Anchor percentiles
-    P1 = 17, P2 = 34, P3 = 50, P4 = 67
-  ) %>%
-  rowwise() %>%
-  mutate(
+    L1   = if_else(is_fulltime, Level1_full, Level1_part),
+    L2   = if_else(is_fulltime, Level2_full, Level2_part),
+    L3   = if_else(is_fulltime, Level3_full, Level3_part),
+    L4   = if_else(is_fulltime, Level4_full, Level4_part),
     wage = petition_annual_pay_clean,
-    
-    # Build a named lookup of non-missing (level, percentile) pairs
-    # then interpolate based on where wage falls
-    
-    petition_percentile = {
-      # Collect non-missing thresholds as a small lookup
-      lvls <- c(L1, L2, L3, L4)
-      pcts <- c(17, 34, 50, 67)
-      keep <- !is.na(lvls)
-      lvls <- lvls[keep]
-      pcts <- pcts[keep]
-      
-      if (length(lvls) == 0 || is.na(wage)) {
-        NA_real_
-      } else if (wage < min(lvls)) {
-        NA_real_  # Too Low or Missing lower bound — handled in status variable
-      } else if (wage >= max(lvls)) {
-        100
-      } else {
-        # Find the two closest non-missing levels that bracket the wage
-        lower_idx <- max(which(lvls <= wage))
-        upper_idx <- min(which(lvls > wage))
-        lo_lvl <- lvls[lower_idx]; hi_lvl <- lvls[upper_idx]
-        lo_pct <- pcts[lower_idx]; hi_pct <- pcts[upper_idx]
-        # Linear interpolation
-        interp <- lo_pct + (wage - lo_lvl) / (hi_lvl - lo_lvl) * (hi_pct - lo_pct)
-        floor(interp)
-      }
-    },
-    
-    petition_wage_status = {
-      lvls <- c(L1, L2, L3, L4)
-      pcts <- c(17, 34, 50, 67)
-      keep <- !is.na(lvls)
-      lvls_clean <- lvls[keep]
-      
-      if (is.na(wage)) {
-        NA_character_
-      } else if (length(lvls_clean) == 0) {
-        "Missing lower bound"
-      } else if (wage >= max(lvls_clean)) {
-        "Above Level 4"
-      } else if (wage < min(lvls_clean)) {
-        # Check: is Level 1 missing and the wage is below the lowest available level?
-        if (is.na(L1) && wage < min(lvls_clean)) {
-          "Missing lower bound"
-        } else {
-          "Too Low"
-        }
-      } else {
-        NA_character_
-      }
-    }
-    
+    petition_percentile  = mapply(.calc_petition_percentile,  L1, L2, L3, L4, wage),
+    petition_wage_status = mapply(.calc_petition_wage_status, L1, L2, L3, L4, wage)
   ) %>%
-  ungroup() %>%
-  # Clean up helper columns
-  select(-is_fulltime, -L1, -L2, -L3, -L4, -P1, -P2, -P3, -P4, -wage)
+  select(-is_fulltime, -L1, -L2, -L3, -L4, -wage)
 ########################################################################################
 # STEP 3: Construct national 67th/90th (national) occupation percentiles using ACS data. 
 ########################################################################################
@@ -159,42 +140,30 @@ h1b_22_24 <- h1b_22_24 %>%
     # Retrieve L4 again for the lower bound of ACS interpolation
     L4 = if_else(is_fulltime, Level4_full, Level4_part)
   ) %>%
-  rowwise() %>%
   mutate(
     wage = petition_annual_pay_clean,
-    
-    # --- ACS interpolation (67th–90th percentile) ---
-    # Only attempt for "Above Level 4" petitions
-    petition_percentile_acs = {
-      if (is.na(petition_wage_status) || petition_wage_status != "Above Level 4") {
-        NA_real_
-      } else if (is.na(wage) || is.na(L4) || is.na(ptile90_adj)) {
-        NA_real_
-      } else if (wage >= ptile90_adj) {
-        100
-      } else {
-        # Interpolate between L4 (67th pct) and ptile90_adj (90th pct)
-        interp <- 67 + (wage - L4) / (ptile90_adj - L4) * (90 - 67)
-        floor(interp)
-      }
-    },
-    
-    # --- Combined percentile column ---
+    # mapply applies the same scalar logic as the original rowwise() block.
+    # case_when is already vectorized so no change needed there.
+    petition_percentile_acs = mapply(
+      function(w, status, l4, p90) {
+        if (is.na(status) || status != "Above Level 4") return(NA_real_)
+        if (is.na(w) || is.na(l4) || is.na(p90))        return(NA_real_)
+        if (w >= p90) return(100)
+        floor(67 + (w - l4) / (p90 - l4) * (90 - 67))
+      },
+      wage, petition_wage_status, L4, ptile90_adj
+    ),
     petition_percentile_combined = case_when(
       !is.na(petition_percentile) & petition_percentile <= 67 ~ petition_percentile,
       !is.na(petition_percentile_acs)                        ~ petition_percentile_acs,
       TRUE                                                    ~ NA_real_
     ),
-    
-    # --- Interpolation method note ---
     interpolation_method = case_when(
       !is.na(petition_percentile) & petition_percentile <= 67 ~ "OFLC interpolated",
       !is.na(petition_percentile_acs)                        ~ "ACS interpolated",
       TRUE                                                    ~ NA_character_
     )
-    
   ) %>%
-  ungroup() %>%
   select(-is_fulltime, -ptile90_adj, -L4, -wage)
 ########################################################################################
 # STEP 5: Output CSV with estimated percentiles.
